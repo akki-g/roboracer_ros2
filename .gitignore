@@ -1,0 +1,6 @@
+# colcon output (built inside the container, never committed)
+build/
+install/
+log/
+
+.DS_Store
