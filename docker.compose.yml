@@ -1,0 +1,34 @@
+# Laptop:  docker compose up -d          then  docker compose exec dev bash
+# Jetson:  docker compose up -d car      then  docker compose exec car bash
+# After changing a package.xml (new dependencies), add --build to the up command.
+name: roboracer
+
+services:
+  # Laptop: driver stack + simulator, no hardware.
+  dev:
+    build: { context: ., target: dev }
+    image: roboracer:dev
+    working_dir: /root/ros2_ws
+    volumes:
+      - ./:/root/ros2_ws
+    ports:
+      - "8765:8765"              # Foxglove connects to ws://localhost:8765
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+
+  # Jetson: the real car. Only starts when you name it.
+  car:
+    profiles: [car]
+    build: { context: ., target: car }
+    image: roboracer:car
+    working_dir: /root/ros2_ws
+    volumes:
+      - ./:/root/ros2_ws
+      - /dev:/dev                # VESC, LiDAR, controller (including re-plugs)
+      - /run/udev:/run/udev:ro   # lets the joy driver find the controller
+    privileged: true
+    network_mode: host           # topics reachable from laptops; Foxglove at ws://<jetson-ip>:8765
+    ipc: host
+    restart: unless-stopped      # back after a reboot (the container only sleeps; nothing drives)
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}

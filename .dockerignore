@@ -5,4 +5,5 @@ log
 build_docker
 install_docker
 log_docker
-rosbag2_*/
+bags
+rosbag2_*

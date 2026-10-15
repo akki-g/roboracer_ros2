@@ -1,4 +1,10 @@
+# Build output, outside Docker and inside it
 build/
 install/
 log/
+build_docker/
+install_docker/
+log_docker/
+
+# New recordings land in the repo root; move the ones worth keeping into bags/
 rosbag2_*/
