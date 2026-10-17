@@ -1,4 +1,8 @@
 {
+  nixConfig = {
+    extra-substituters = [ "http://100.88.115.111:8080/c/admin/ros-test" ];
+    extra-trusted-public-keys = [ "ros-test:jqJlOuADuaw5ElHZRYPEX/NZpyj5u3c2ydIPf0A5OaM=" ];
+  };
   inputs = {
     flake-utils = { url = "github:numtide/flake-utils"; };
     # Nix Ros Overlay
@@ -19,6 +23,15 @@
             # TORCH_LIBRARIES = "${torch.packages.x86_64-linux.libtorch.out}/lib";
             CMAKE_MODULE_PATH = "${pkgs.opencv.out}/lib/cmake/opencv4";
 
+            # shellHook = ''
+            #   # Bind the host WSL driver directories back into the linker path
+            #   export LD_LIBRARY_PATH="/usr/lib/wsl/lib:$LD_LIBRARY_PATH"
+              
+            #   # (Optional) If you are using standard Ubuntu/Debian WSL instead of NixOS-WSL,
+            #   # ensure your DISPLAY and Wayland variables are preserved:
+            #   export DISPLAY=''${DISPLAY:-:0}
+            # '';
+
             packages = [
               # Generic DevTools
               # clang-tools must be first before clang
@@ -32,6 +45,9 @@
                 enableJPEG = true;
                 enableFfmpeg = true;
               })
+              # libGL
+              # libglvnd
+              # xorg.libX11
 
               # ROS Packages
               pkgs.colcon
@@ -50,6 +66,7 @@
                     ackermann-msgs
                     diagnostic-updater
                     python-cmake-module
+                    rviz2
 
                     # ... other ROS packages
                   ];
