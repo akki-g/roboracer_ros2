@@ -13,7 +13,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
 
-        # 🔥 THIS LINE FIXES YOUR LAUNCH FILE ISSUE
+        # THIS LINE FIXES YOUR LAUNCH FILE ISSUE
         (os.path.join('share', package_name, 'launch'),
             glob('launch/*.launch.py')),
     ],
@@ -25,7 +25,7 @@ setup(
     license='TODO',
     tests_require=['pytest'],
 
-    # 🔥 THIS LINE FIXES YOUR NODE EXECUTION
+    # THIS LINE FIXES YOUR NODE EXECUTION
     entry_points={
         'console_scripts': [
             'wall_follow_node = wall_follow_pkg.wall_follow_node:main',

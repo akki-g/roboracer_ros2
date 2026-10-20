@@ -72,7 +72,7 @@ class SafetyNode(Node):
         msg.drive.steering_angle = 0.0
         self.pub.publish(msg)
         self.last_break_time = time.time()
-        self.get_logger().warn("🚨 EMERGENCY BRAKE")
+        self.get_logger().warn("EMERGENCY BRAKE")
 
 
 def main(args=None):
