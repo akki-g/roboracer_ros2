@@ -4,6 +4,7 @@ import rclpy
 from rclpy.node import Node
 import numpy as np
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32, Int16
 from ackermann_msgs.msg import AckermannDriveStamped
 
 
@@ -30,6 +31,8 @@ class WallFollow(Node):
 
         # SUBSCRIBE
         self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        self.pid_error_pub = self.create_publisher(Float32, "/pid_error", 0)
+        self.pid_target_pub = self.create_publisher(Float32, "/pid_target", 0)
 
         # PUBLISH
         self.drive_pub = self.create_publisher(AckermannDriveStamped, '/drive', 10)
@@ -96,6 +99,8 @@ class WallFollow(Node):
         angle = P + I + D
         self.prev_error = error
 
+        pre_clamped_angle: float = angle
+
         # Clamp steering
         angle = np.clip(angle, -0.5, 0.5)
 
@@ -115,6 +120,15 @@ class WallFollow(Node):
         msg.drive.steering_angle = float(angle)
 
         self.drive_pub.publish(msg)
+        
+        pre_clamped_msg = Float32()
+        pre_clamped_msg.data = pre_clamped_angle
+        
+        error_msg = Float32()
+        error_msg.data = error
+        
+        self.pid_target_pub.publish(pre_clamped_angle)
+        self.pid_error_pub.publish(error_msg)
 
     def scan_callback(self, msg):
         error = self.get_error(msg, self.desired_distance)

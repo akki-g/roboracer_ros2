@@ -11,8 +11,8 @@ services:
     working_dir: /root/ros2_ws
     volumes:
       - ./:/root/ros2_ws
-    ports:
-      - "8765:8765"              # Foxglove connects to ws://localhost:8765
+    # ports:
+      # - "8765:8765"              # Foxglove connects to ws://localhost:8765
     environment:
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
 

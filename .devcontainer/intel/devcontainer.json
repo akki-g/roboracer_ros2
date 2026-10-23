@@ -3,7 +3,8 @@
 {
   "name": "ROS Environment INTEL",
   "build": {
-    "dockerfile": "../../Dockerfile"
+    "dockerfile": "../../Dockerfile",
+    "target": "dev"
   },
   // 1. Mount the Wayland Socket and GPU rendering devices consistency=cached
   "mounts": [
@@ -22,9 +23,15 @@
   "remoteEnv": {
     "DISPLAY": "${localEnv:DISPLAY}"
   },
-  "forwardPorts": [
-    8765
-  ],
+  "privileged": true,
+  "appPort": 8765,
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1.10.1": {
+      "version": "latest",
+      "installDockerBuildx": true,
+      "dockerDashComposeVersion": "latest"
+    }
+  },
   // Use 'postCreateCommand' to run commands after the container is created.
   "postCreateCommand": "",
   // Configure tool-specific properties.
