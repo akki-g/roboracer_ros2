@@ -127,7 +127,7 @@ class WallFollow(Node):
         error_msg = Float32()
         error_msg.data = error
         
-        self.pid_target_pub.publish(pre_clamped_angle)
+        self.pid_target_pub.publish(pre_clamped_msg)
         self.pid_error_pub.publish(error_msg)
 
     def scan_callback(self, msg):
