@@ -1,0 +1,66 @@
+// macOS (Apple Silicon or Intel) with Docker Desktop + XQuartz.
+// Builds natively for arm64 on Apple Silicon: ros:humble and every dependency
+// in the Dockerfile ship arm64 builds, so no emulation is involved.
+//
+// One-time host setup (macOS terminal), then fully quit and reopen XQuartz:
+//   defaults write org.xquartz.X11 nolisten_tcp -bool false
+//   defaults write org.xquartz.X11 enable_iglx -bool true
+{
+  "name": "ROS Environment macOS",
+  "build": {
+    "dockerfile": "../../Dockerfile",
+    // Repo root, so the Dockerfile's `COPY src/ src/` can find src/
+    "context": "../..",
+    "target": "dev"
+  },
+
+  // Same layout as docker.compose.yml, so .bashrc sources install_docker/
+  // and colcon builds your live code instead of the copy baked into the image.
+  "workspaceMount": "source=${localWorkspaceFolder},target=/root/ros2_ws,type=bind",
+  "workspaceFolder": "/root/ros2_ws",
+
+  // Docker Desktop can't share the X11 Unix socket or a GPU with containers,
+  // so GUIs go over TCP to XQuartz and render in software.
+  // Re-allow the container each time XQuartz starts (no-op if XQuartz isn't running).
+  "initializeCommand": "DISPLAY=:0 /opt/X11/bin/xhost +localhost >/dev/null 2>&1 || true",
+  "containerEnv": {
+    "DISPLAY": "host.docker.internal:0",
+    "LIBGL_ALWAYS_SOFTWARE": "1",
+    "QT_X11_NO_MITSHM": "1"
+  },
+
+  // No --network=host here: on macOS it would attach to Docker's VM, not your Mac,
+  // and hide the port below. Foxglove (started by sim/sim.launch.py) is at ws://localhost:8765.
+  "runArgs": ["--ipc=host"],
+  "appPort": [8765],
+
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1.10.1": {
+      "version": "latest",
+      "installDockerBuildx": true,
+      "dockerDashComposeVersion": "latest"
+    }
+  },
+
+  // The clangd extension has no auto-download for Linux arm64, so use Ubuntu's.
+  "postCreateCommand": "apt-get update && apt-get install -y --no-install-recommends clangd && rm -rf /var/lib/apt/lists/*",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "clangd.path": "/usr/bin/clangd"
+      },
+      "extensions": [
+        "ms-vscode.cmake-tools",
+        "Ranch-Hand-Robotics.rde-ros-2",
+        "llvm-vs-code-extensions.vscode-clangd",
+        "ms-python.vscode-pylance",
+        "ms-python.python",
+        "ms-python.debugpy",
+        "ms-python.vscode-python-envs",
+        "ms-vscode.cpptools",
+        "ms-vscode.cpp-devtools"
+      ]
+    }
+  }
+}

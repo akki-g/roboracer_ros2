@@ -3,8 +3,14 @@
 {
   "name": "ROS Environment WSL-NVIDIA",
   "build": {
-    "dockerfile": "../../Dockerfile"
+    "dockerfile": "../../Dockerfile",
+    // Repo root, so the Dockerfile's `COPY src/ src/` can find src/
+    "context": "../.."
   },
+  // Same layout as docker.compose.yml, so .bashrc sources install_docker/
+  // and colcon builds your live code instead of the copy baked into the image.
+  "workspaceMount": "source=${localWorkspaceFolder},target=/root/ros2_ws,type=bind",
+  "workspaceFolder": "/root/ros2_ws",
   // 1. Mount the Wayland Socket and GPU rendering devices consistency=cached
   "mounts": [
     "source=/mnt/wslg/.X11-unix,target=/tmp/.X11-unix,type=bind",
