@@ -10,7 +10,6 @@ from launch_ros.actions import Node
 
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sim.yaml')
 
-
 def generate_launch_description():
     gym_share = get_package_share_directory('f1tenth_gym_ros')
     with open(CONFIG) as f:

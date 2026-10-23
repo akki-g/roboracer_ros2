@@ -64,3 +64,5 @@ RUN mkdir -p /sim_ws/src \
     && source /opt/ros/humble/setup.bash \
     && cd /sim_ws \
     && COLCON_HOME=/nonexistent COLCON_LOG_PATH=/sim_ws/log colcon build
+
+RUN apt update
