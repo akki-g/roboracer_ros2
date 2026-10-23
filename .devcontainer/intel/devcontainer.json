@@ -23,6 +23,7 @@
   "remoteEnv": {
     "DISPLAY": "${localEnv:DISPLAY}"
   },
+  "initializeCommand": "xhost +local:docker",
   "privileged": true,
   "appPort": 8765,
   "features": {
