@@ -19,7 +19,7 @@ class WallFollow(Node):
         self.ki = 0.0
 
         self.desired_distance = 1.2
-        self.lookahead_distance = 1.0
+        self.lookahead_distance = 2.0
         self.theta = np.deg2rad(50.0)
 
         self.wall_side = 'left'   # TRY 'right' IF NEEDED
