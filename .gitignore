@@ -9,3 +9,5 @@ log_docker/
 # New recordings land in the repo root; move the ones worth keeping into bags/
 rosbag2_*/
 __pycache__
+
+.vscode/
