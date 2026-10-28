@@ -47,7 +47,10 @@
         "ms-python.debugpy",
         "ms-python.vscode-python-envs",
         "ms-vscode.cpptools",
-        "ms-vscode.cpp-devtools"
+        "ms-vscode.cpp-devtools",
+        "magicstack.MagicPython",
+        "ms-python.black-formatter",
+        "KevinRose.vsc-python-indent"
       ]
     }
   }

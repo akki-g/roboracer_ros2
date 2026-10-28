@@ -66,4 +66,4 @@ RUN mkdir -p /sim_ws/src \
     && COLCON_HOME=/nonexistent COLCON_LOG_PATH=/sim_ws/log colcon build
 
 RUN apt update
-RUN apt install ros-humble-rviz2
+RUN apt install -y --no-install-recommends ros-humble-rviz2 clangd
