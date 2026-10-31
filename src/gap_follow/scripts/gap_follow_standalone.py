@@ -41,20 +41,20 @@ import numpy as np
 
 @dataclass(frozen=True)
 class GapConfig:
-    max_speed: float = 0.5
+    max_speed: float = 1.5
     min_speed: float = 0.15       # Corner speed before clearance scaling.
     max_steering_angle: float = 0.35
     max_lidar_range: float = 10.0
     forward_fov_deg: float = 180.0
     bubble_radius: float = 0.25
-    min_gap_distance: float = 0.75
+    min_gap_distance: float = 0.60
     stop_distance: float = 0.5
     slow_distance: float = 1.5
     front_sector_deg: float = 20.0
     min_front_valid_fraction: float = 0.7
     preprocess_conv_size: int = 3
     disparity_threshold: float = 0.3
-    target_window_deg: float = 10.0
+    target_window_deg: float = 6.0
 
     def __post_init__(self):
         for field in fields(self):

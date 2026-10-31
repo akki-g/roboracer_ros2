@@ -106,11 +106,11 @@ class WallFollow(Node):
 
         # Speed control
         if abs(angle) < 0.1:
-            speed = 2
+            speed = 1.25
         elif abs(angle) < 0.3:
-            speed = 1.5
-        else:
             speed = 1
+        else:
+            speed = 0.5
 
         # Slight smoothing
         angle *= 0.7
