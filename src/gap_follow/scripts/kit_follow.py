@@ -16,11 +16,11 @@ class ReactiveFollowGap(Node):
         super().__init__('reactive_node')
 
         # Declare parameters
-        self.declare_parameter('bubble_radius', 0.5)
+        self.declare_parameter('bubble_radius', 0.6)
         self.declare_parameter('preprocess_conv_size', 3)
         self.declare_parameter('max_lidar_range', 3.0)
-        self.declare_parameter('speed_min', 1.5)
-        self.declare_parameter('speed_max', 2.5)
+        self.declare_parameter('speed_min', 0.15)
+        self.declare_parameter('speed_max', 1.5)
         self.declare_parameter('steering_gain', 1.0)
 
         # Get parameters
@@ -168,8 +168,8 @@ class ReactiveFollowGap(Node):
 
         # Weighted selection
         best_idx = int(
-            0.5 * furthest_idx +
-            0.5 * centered_idx
+            0.8 * furthest_idx +
+            0.2 * centered_idx
         )
 
         return best_idx
