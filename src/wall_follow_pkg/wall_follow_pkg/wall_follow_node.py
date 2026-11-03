@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import rclpy
+import math
+
 from rclpy.node import Node
 import numpy as np
 from sensor_msgs.msg import LaserScan
@@ -16,7 +18,7 @@ class WallFollow(Node):
         # PARAMETERS
         self.kp = 0.5
         self.kd = 0.025
-        self.ki = 0.0
+        self.ki = 0.05
 
         self.desired_distance = 1.2
         self.lookahead_distance = 2.0
@@ -75,8 +77,31 @@ class WallFollow(Node):
 
         error = D_t1 - desired_dist
         return error
+      
+    def get_v(self, scan):
+      if self.wall_side == 'right':
+          angle_b = -np.pi / 2
+          angle_a = angle_b + self.theta
+      else:
+          angle_b = np.pi / 2
+          angle_a = angle_b - self.theta
 
-    def pid_control(self, error):
+      b = self.get_range(scan, angle_b)
+      a = self.get_range(scan, angle_a)
+
+      numerator = a * np.cos(self.theta) - b
+      denominator = a * np.sin(self.theta)
+
+      if abs(denominator) < 1e-6:
+          alpha = 0.0
+      else:
+          alpha = np.arctan2(numerator, denominator)
+            
+      v = 2.5 * (1 - math.pow(math.sin(alpha), 3))
+      
+      return v
+
+    def pid_control(self, error, vel):
 
         current_time = self.get_clock().now()
 
@@ -104,13 +129,14 @@ class WallFollow(Node):
         # Clamp steering
         angle = np.clip(angle, -0.5, 0.5)
 
-        # Speed control
-        if abs(angle) < 0.1:
-            speed = 2
-        elif abs(angle) < 0.3:
-            speed = 1.5
-        else:
-            speed = 1
+        speed = vel
+        # # Speed control
+        # if abs(angle) < 0.1:
+        #     speed = 2
+        # elif abs(angle) < 0.3:
+        #     speed = 1.5
+        # else:
+        #     speed = 1
 
         # Slight smoothing
         angle *= 0.7
@@ -120,19 +146,20 @@ class WallFollow(Node):
         msg.drive.steering_angle = float(angle)
 
         self.drive_pub.publish(msg)
-        
+
         pre_clamped_msg = Float32()
         pre_clamped_msg.data = pre_clamped_angle
-        
+
         error_msg = Float32()
         error_msg.data = error
-        
+
         self.pid_target_pub.publish(pre_clamped_msg)
         self.pid_error_pub.publish(error_msg)
 
     def scan_callback(self, msg):
         error = self.get_error(msg, self.desired_distance)
-        self.pid_control(error)
+        a = self.get_v(msg)
+        self.pid_control(error, a)
 
 
 def main(args=None):
