@@ -1,0 +1,13 @@
+# ROS sim (f1tenth_gym_ros). Confirm names with `ros2 topic list` first:
+# the bridge namespaces odometry as /ego_racecar/odom.
+policy_node:
+  ros__parameters:
+    scan_topic: /scan
+    odom_topic: /ego_racecar/odom
+    drive_topic: /drive
+    max_speed: 1.5
+    steer_limit: 0.4189
+    ttc_threshold: 0.5
+    ttc_half_angle_deg: 30.0
+    scan_timeout: 0.1
+    odom_timeout: 0.2
