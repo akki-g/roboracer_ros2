@@ -1,0 +1,322 @@
+{
+  "schema_version": 1,
+  "suite": "quick",
+  "controller_source": "scripts/gap_follow_standalone.py",
+  "controller_sha256": "d9b434a8895e4ea85e06b63b79b04981b8d476eedc9f9f8f730c64c78facacb6",
+  "harness_sha256": "a257a45ddf8dbfbab8a9c1cf0bc2bb470c67c6d01b465263675824bedfe26e4d",
+  "profiles": {
+    "low_speed": {
+      "configuration": {
+        "max_speed": 0.5,
+        "min_speed": 0.15,
+        "max_steering_angle": 0.35,
+        "max_lidar_range": 10.0,
+        "forward_fov_deg": 260.0,
+        "bubble_radius": 0.25,
+        "min_gap_distance": 0.6,
+        "stop_distance": 0.15,
+        "slow_distance": 1.5,
+        "front_sector_deg": 20.0,
+        "min_front_valid_fraction": 0.7,
+        "preprocess_conv_size": 3,
+        "disparity_threshold": 0.3,
+        "target_window_deg": 6.0,
+        "wheelbase": 0.33,
+        "lidar_offset": 0.27,
+        "vehicle_front": 0.43,
+        "vehicle_rear": 0.12,
+        "path_horizon": 3.0,
+        "path_step": 0.1,
+        "min_path_distance": 0.3,
+        "steering_samples": 41,
+        "max_lateral_accel": 1.5,
+        "braking_decel": 2.5,
+        "reaction_time": 0.3,
+        "max_acceleration": 1.0,
+        "inf_is_free": false,
+        "planning_horizon": 5.0,
+        "branch_distance": 0.9,
+        "comfort_clearance": 0.35,
+        "crawl_speed": 0.15
+      },
+      "configuration_sha256": "dd89522497153337cc7f2397f8e72476cc4e7204c19a9d30d29b5a3cce489c56"
+    },
+    "high_speed_ceiling": {
+      "configuration": {
+        "max_speed": 20.0,
+        "min_speed": 0.15,
+        "max_steering_angle": 0.35,
+        "max_lidar_range": 10.0,
+        "forward_fov_deg": 260.0,
+        "bubble_radius": 0.25,
+        "min_gap_distance": 0.6,
+        "stop_distance": 0.15,
+        "slow_distance": 1.5,
+        "front_sector_deg": 20.0,
+        "min_front_valid_fraction": 0.7,
+        "preprocess_conv_size": 3,
+        "disparity_threshold": 0.3,
+        "target_window_deg": 6.0,
+        "wheelbase": 0.33,
+        "lidar_offset": 0.27,
+        "vehicle_front": 0.43,
+        "vehicle_rear": 0.12,
+        "path_horizon": 3.0,
+        "path_step": 0.1,
+        "min_path_distance": 0.3,
+        "steering_samples": 41,
+        "max_lateral_accel": 1.5,
+        "braking_decel": 2.5,
+        "reaction_time": 0.3,
+        "max_acceleration": 1.0,
+        "inf_is_free": false,
+        "planning_horizon": 5.0,
+        "branch_distance": 0.9,
+        "comfort_clearance": 0.35,
+        "crawl_speed": 0.15
+      },
+      "configuration_sha256": "271c857c3dfbed0045d579a7485087bad26ef3ff4c9bde2005f2ee85e93a9c95"
+    },
+    "aggressive_simulation_only": {
+      "configuration": {
+        "max_speed": 20.0,
+        "min_speed": 0.15,
+        "max_steering_angle": 0.35,
+        "max_lidar_range": 10.0,
+        "forward_fov_deg": 260.0,
+        "bubble_radius": 0.25,
+        "min_gap_distance": 0.6,
+        "stop_distance": 0.15,
+        "slow_distance": 1.5,
+        "front_sector_deg": 20.0,
+        "min_front_valid_fraction": 0.7,
+        "preprocess_conv_size": 3,
+        "disparity_threshold": 0.3,
+        "target_window_deg": 6.0,
+        "wheelbase": 0.33,
+        "lidar_offset": 0.27,
+        "vehicle_front": 0.43,
+        "vehicle_rear": 0.12,
+        "path_horizon": 3.0,
+        "path_step": 0.1,
+        "min_path_distance": 0.3,
+        "steering_samples": 41,
+        "max_lateral_accel": 6.0,
+        "braking_decel": 9.0,
+        "reaction_time": 0.3,
+        "max_acceleration": 9.0,
+        "inf_is_free": false,
+        "planning_horizon": 5.0,
+        "branch_distance": 0.9,
+        "comfort_clearance": 0.35,
+        "crawl_speed": 0.15
+      },
+      "configuration_sha256": "6734e1f97512cbfb3bb58a2e136718e1a399b4cea7563bd5cbfdce86bfc27760"
+    }
+  },
+  "limitations": [
+    "Ideal bicycle motion tracks commanded speed and steering immediately; no tire slip, steering lag, motor dynamics, or braking lag is simulated.",
+    "Static synthetic walls and noiseless 1081-beam scans are used; these are not measurements reconstructed from the photograph.",
+    "Simulation time advances independently of computation time. A 0.025 s control interval does not establish real-time 40 Hz capability.",
+    "Reported peak speeds are simulated commanded speeds, not physical-car measurements. Braking and curvature limits can keep them far below the cap.",
+    "The collision body uses the existing regression estimate of 0.155 m half-width, with the configured front and rear extents. It is not a new calibration.",
+    "Aggressive parameters apply only to this offline experiment and do not validate those limits for the physical car."
+  ],
+  "expected_case_count": 6,
+  "complete": true,
+  "all_finished": true,
+  "results": [
+    {
+      "scenario": "narrowing",
+      "direction": "right",
+      "control_interval_s": 0.1,
+      "outcome": "finished",
+      "command_count": 157,
+      "simulated_time_s": 15.7,
+      "distance_m": 6.2617,
+      "peak_commanded_speed_mps": 0.5,
+      "mean_commanded_speed_mps": 0.398832,
+      "wall_time_s": 15.066,
+      "compute_wall_time_ms": {
+        "median": 62.88,
+        "p95": 161.331,
+        "maximum": 215.705
+      },
+      "final_pose_x_y_yaw": [
+        -0.534362,
+        -1.330022,
+        -2.91674
+      ],
+      "final_command": {
+        "steering_angle": -0.08750000000000002,
+        "speed": 0.5,
+        "reason": "ok",
+        "target_angle": -0.0523598775597387,
+        "front_clearance": 1.762444835570023,
+        "path_clearance": 2.6,
+        "planning_clearance": 5.0
+      },
+      "profile": "low_speed"
+    },
+    {
+      "scenario": "narrowing",
+      "direction": "left",
+      "control_interval_s": 0.1,
+      "outcome": "finished",
+      "command_count": 156,
+      "simulated_time_s": 15.6,
+      "distance_m": 6.2217,
+      "peak_commanded_speed_mps": 0.5,
+      "mean_commanded_speed_mps": 0.398825,
+      "wall_time_s": 13.63,
+      "compute_wall_time_ms": {
+        "median": 60.507,
+        "p95": 141.442,
+        "maximum": 183.986
+      },
+      "final_pose_x_y_yaw": [
+        -0.507392,
+        1.287186,
+        2.9495
+      ],
+      "final_command": {
+        "steering_angle": 0.05249999999999999,
+        "speed": 0.5,
+        "reason": "ok",
+        "target_angle": 9.325873406851315e-14,
+        "front_clearance": 2.069529793645147,
+        "path_clearance": 3.0,
+        "planning_clearance": 5.0
+      },
+      "profile": "low_speed"
+    },
+    {
+      "scenario": "narrowing",
+      "direction": "right",
+      "control_interval_s": 0.1,
+      "outcome": "finished",
+      "command_count": 58,
+      "simulated_time_s": 5.8,
+      "distance_m": 6.2843,
+      "peak_commanded_speed_mps": 1.923939,
+      "mean_commanded_speed_mps": 1.083505,
+      "wall_time_s": 4.999,
+      "compute_wall_time_ms": {
+        "median": 60.283,
+        "p95": 140.436,
+        "maximum": 180.043
+      },
+      "final_pose_x_y_yaw": [
+        -0.546955,
+        -1.282859,
+        -2.988675
+      ],
+      "final_command": {
+        "steering_angle": -0.10500000000000001,
+        "speed": 1.9239391577058977,
+        "reason": "ok",
+        "target_angle": 9.325873406851315e-14,
+        "front_clearance": 2.064431234945438,
+        "path_clearance": 2.0,
+        "planning_clearance": 5.0
+      },
+      "profile": "high_speed_ceiling"
+    },
+    {
+      "scenario": "narrowing",
+      "direction": "left",
+      "control_interval_s": 0.1,
+      "outcome": "finished",
+      "command_count": 58,
+      "simulated_time_s": 5.8,
+      "distance_m": 6.4092,
+      "peak_commanded_speed_mps": 1.907061,
+      "mean_commanded_speed_mps": 1.105036,
+      "wall_time_s": 5.293,
+      "compute_wall_time_ms": {
+        "median": 65.454,
+        "p95": 140.277,
+        "maximum": 180.746
+      },
+      "final_pose_x_y_yaw": [
+        -0.602135,
+        1.40995,
+        2.973734
+      ],
+      "final_command": {
+        "steering_angle": 0.10499999999999998,
+        "speed": 1.907060931706709,
+        "reason": "ok",
+        "target_angle": 0.06108652381989721,
+        "front_clearance": 1.6722184929279933,
+        "path_clearance": 2.3000000000000003,
+        "planning_clearance": 5.0
+      },
+      "profile": "high_speed_ceiling"
+    },
+    {
+      "scenario": "dogleg",
+      "direction": "right",
+      "control_interval_s": 0.1,
+      "outcome": "finished",
+      "command_count": 32,
+      "simulated_time_s": 3.2,
+      "distance_m": 9.9585,
+      "peak_commanded_speed_mps": 4.95441,
+      "mean_commanded_speed_mps": 3.112036,
+      "wall_time_s": 3.138,
+      "compute_wall_time_ms": {
+        "median": 63.412,
+        "p95": 185.071,
+        "maximum": 233.27
+      },
+      "final_pose_x_y_yaw": [
+        6.032232,
+        -2.075331,
+        -0.014689
+      ],
+      "final_command": {
+        "steering_angle": 0.0,
+        "speed": 4.954410493303845,
+        "reason": "ok",
+        "target_angle": 9.325873406851315e-14,
+        "front_clearance": 3.2879222830501655,
+        "path_clearance": 3.0,
+        "planning_clearance": 5.0
+      },
+      "profile": "aggressive_simulation_only"
+    },
+    {
+      "scenario": "dogleg",
+      "direction": "left",
+      "control_interval_s": 0.1,
+      "outcome": "finished",
+      "command_count": 32,
+      "simulated_time_s": 3.2,
+      "distance_m": 9.9585,
+      "peak_commanded_speed_mps": 4.95441,
+      "mean_commanded_speed_mps": 3.112036,
+      "wall_time_s": 3.071,
+      "compute_wall_time_ms": {
+        "median": 63.655,
+        "p95": 172.263,
+        "maximum": 205.073
+      },
+      "final_pose_x_y_yaw": [
+        6.032232,
+        2.075331,
+        0.014689
+      ],
+      "final_command": {
+        "steering_angle": 0.0,
+        "speed": 4.954410493303845,
+        "reason": "ok",
+        "target_angle": 9.325873406851315e-14,
+        "front_clearance": 3.28792228305006,
+        "path_clearance": 3.0,
+        "planning_clearance": 5.0
+      },
+      "profile": "aggressive_simulation_only"
+    }
+  ]
+}

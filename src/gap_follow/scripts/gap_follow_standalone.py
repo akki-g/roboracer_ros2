@@ -19,10 +19,10 @@ them. Vehicle dimensions and lidar_offset are measured from the rear axle.
 These are initial settings, not a measurement or calibration of this car.
 
 Angle zero must point forward and positive scan angles/steering point left.
-Gap preference guides sampled Ackermann paths, checked against LiDAR returns
-with a swept rectangular footprint. Selected arcs branch into turn/straighten
-continuations; only the first arc's clearance authorizes speed. Leading-body samples must be in observed
-free space. The default 260-degree usable scan excludes the outer 5 degrees
+Gap preference guides sampled Ackermann arcs, checked against LiDAR returns
+with a swept rectangular footprint. Each scan selects one steering angle;
+the arc's checked clearance bounds speed. Leading-body samples must be in
+observed free space. The default 260-degree usable scan excludes the outer 5 degrees
 at either rear edge of this car's 270-degree scan, where close peripheral
 returns vetoed every path. Excluded sectors are unobserved, not free space.
 The rear blind spot, tire slip, steering dynamics, and moving
@@ -39,7 +39,7 @@ Algorithm reference: https://github.com/f1tenth/f1tenth_lab4_template
 ROS timer API: https://github.com/ros2/rclpy/blob/humble/rclpy/rclpy/node.py
 """
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 import math
 from numbers import Integral, Real
 import sys
@@ -51,14 +51,13 @@ import numpy as np
 @dataclass(frozen=True)
 class GapConfig:
     max_speed: float = 1.5
-    min_speed: float = 0.15       # Nominal crawl speed, never overrides safety limits.
+    min_speed: float = 0.15       # Nominal cruise floor, never overrides safety limits.
     max_steering_angle: float = 0.35
     max_lidar_range: float = 10.0
     forward_fov_deg: float = 260.0  # Keep side walls; exclude the obstructed rear scan edges.
     bubble_radius: float = 0.25
     min_gap_distance: float = 0.60
-    stop_distance: float = 0.15  # Reserve along the checked path, NOT front-ray range.
-    slow_distance: float = 1.5
+    slow_distance: float = 0.10
     front_sector_deg: float = 20.0
     min_front_valid_fraction: float = 0.7
     preprocess_conv_size: int = 3
@@ -70,17 +69,15 @@ class GapConfig:
     vehicle_rear: float = 0.12
     path_horizon: float = 3.0
     path_step: float = 0.10
-    min_path_distance: float = 0.30
     steering_samples: int = 41
-    max_lateral_accel: float = 1.5
+    max_lateral_accel: float = 4.0
     braking_decel: float = 2.5
     reaction_time: float = 0.30
     max_acceleration: float = 1.0
     inf_is_free: bool = False
-    planning_horizon: float = 5.0
-    branch_distance: float = 0.9
     comfort_clearance: float = 0.35
-    crawl_speed: float = 0.15
+    inner_wall_bias: float = 1.0  # Optional inside-line preference; 0 disables it.
+    inner_wall_clearance: float = 0.10  # Desired extra gap beyond the padded side.
 
     def __post_init__(self):
         for field in fields(self):
@@ -98,8 +95,8 @@ class GapConfig:
             raise ValueError('max_steering_angle must be between 0 and pi/2')
         if not 0 < self.front_sector_deg <= 90 <= self.forward_fov_deg <= 360:
             raise ValueError('Require 0 < front_sector_deg <= 90 <= forward_fov_deg <= 360')
-        if not 0 < self.stop_distance < self.slow_distance <= self.max_lidar_range:
-            raise ValueError('Require 0 < stop_distance < slow_distance <= max_lidar_range')
+        if not 0 < self.slow_distance <= self.max_lidar_range:
+            raise ValueError('Require 0 < slow_distance <= max_lidar_range')
         if not 0 < self.bubble_radius < self.min_gap_distance <= self.max_lidar_range:
             raise ValueError('Require 0 < bubble_radius < min_gap_distance <= max_lidar_range')
         if not 0 < self.min_front_valid_fraction <= 1:
@@ -118,16 +115,14 @@ class GapConfig:
                 raise ValueError(f'{name} must be positive')
         if not 0 <= self.lidar_offset < self.vehicle_front:
             raise ValueError('Require 0 <= lidar_offset < vehicle_front')
-        if not 0 < self.path_step <= self.min_path_distance < self.path_horizon <= self.max_lidar_range:
-            raise ValueError('Require 0 < path_step <= min_path_distance < path_horizon <= max_lidar_range')
-        if not self.path_horizon <= self.planning_horizon <= self.max_lidar_range:
-            raise ValueError('Require path_horizon <= planning_horizon <= max_lidar_range')
-        if not self.min_path_distance <= self.branch_distance < self.path_horizon:
-            raise ValueError('Require min_path_distance <= branch_distance < path_horizon')
-        if self.comfort_clearance <= 0 or self.crawl_speed <= 0:
-            raise ValueError('comfort_clearance and crawl_speed must be positive')
-        if not self.stop_distance < self.min_path_distance:
-            raise ValueError('stop_distance must be smaller than min_path_distance')
+        if not 0 < self.path_step < self.path_horizon <= self.max_lidar_range:
+            raise ValueError('Require 0 < path_step < path_horizon <= max_lidar_range')
+        if self.comfort_clearance <= 0:
+            raise ValueError('comfort_clearance must be positive')
+        if not 0 <= self.inner_wall_bias <= 1:
+            raise ValueError('inner_wall_bias must be between 0 and 1')
+        if not 0 <= self.inner_wall_clearance <= min(1.0, self.max_lidar_range):
+            raise ValueError('inner_wall_clearance must be between 0 and 1 metre, within LiDAR range')
         if (not isinstance(self.steering_samples, Integral)
                 or not 5 <= self.steering_samples <= 101 or self.steering_samples % 2 != 1):
             raise ValueError('steering_samples must be an odd integer from 5 to 101')
@@ -141,7 +136,6 @@ class GapCommand:
     target_angle: float = 0.0
     front_clearance: float = 0.0
     path_clearance: float = 0.0
-    planning_clearance: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -163,13 +157,17 @@ class PathGeometry:
     y: np.ndarray
     cosine: np.ndarray
     sine: np.ndarray
-    sweep_pad: np.ndarray
+    curvature: np.ndarray
     probe_range: np.ndarray
     probe_angle: np.ndarray
     probe_inside: np.ndarray
+    scan_left: np.ndarray = None
+    scan_right: np.ndarray = None
+    scan_observed: np.ndarray = None
 
     def select(self, indices):
-        return PathGeometry(self.travel, *(getattr(self, field.name)[indices]
+        return PathGeometry(self.travel, *(None if getattr(self, field.name) is None
+                            else getattr(self, field.name)[indices]
                             for field in fields(self) if field.name != 'travel'))
 
 
@@ -195,7 +193,7 @@ class GapFollower:
                           front_clearance=float(clearance), path_clearance=float(path_clearance))
 
     def _build_paths(self):
-        """Cache first arcs and turn/straighten continuations in the current frame."""
+        """Cache constant-steering arcs in the current vehicle frame."""
         cfg = self.config
         self._steering = np.linspace(-cfg.max_steering_angle, cfg.max_steering_angle,
                                      cfg.steering_samples)
@@ -206,36 +204,10 @@ class GapFollower:
         x = travel * np.sinc(yaw / math.pi)
         y = travel * np.sin(yaw / 2) * np.sinc(yaw / (2 * math.pi))
         self._paths = self._make_paths(travel, x, y, yaw, self._curvature)
-        # Keep looking for a change of steering as room contracts. A fixed
-        # 0.9 m switch otherwise disappears exactly when entering a tight turn.
-        branch_indices = sorted(set((1, int(np.searchsorted(travel, min(0.3, cfg.branch_distance))),
-                                     int(np.searchsorted(travel, cfg.branch_distance)))))
-        self._branch_travel = float(travel[branch_indices[-1]])
-        self._branch_choices = np.array([travel[index] for index in branch_indices])
-        self._next_steering = np.linspace(-cfg.max_steering_angle, cfg.max_steering_angle, 5)
-        next_curvature = np.tile(np.tan(self._next_steering) / cfg.wheelbase,
-                                 cfg.steering_samples)
-        self._continuations = {}
-        for index in branch_indices:
-            branch = float(travel[index])
-            length = cfg.planning_horizon - branch
-            tail_travel = np.linspace(0.0, length, int(math.ceil(length / cfg.path_step)) + 1)
-            tail_yaw = next_curvature[:, None] * tail_travel
-            tx = tail_travel * np.sinc(tail_yaw / math.pi)
-            ty = tail_travel * np.sin(tail_yaw / 2) * np.sinc(tail_yaw / (2 * math.pi))
-            start_yaw = np.repeat(yaw[:, index], 5)[:, None]
-            start_x = np.repeat(x[:, index], 5)[:, None]
-            start_y = np.repeat(y[:, index], 5)[:, None]
-            tail_x = start_x + tx * np.cos(start_yaw) - ty * np.sin(start_yaw)
-            tail_y = start_y + tx * np.sin(start_yaw) + ty * np.cos(start_yaw)
-            self._continuations[branch] = self._make_paths(
-                tail_travel, tail_x, tail_y, tail_yaw + start_yaw, next_curvature)
 
     def _make_paths(self, travel, x, y, yaw, curvature):
         cfg = self.config
         cosine, sine = np.cos(yaw), np.sin(yaw)
-        corner = math.hypot(max(cfg.vehicle_front, cfg.vehicle_rear), cfg.bubble_radius)
-        pad = cfg.path_step / 2 * (1 + corner * np.abs(curvature))
         lateral = np.linspace(-cfg.bubble_radius, cfg.bubble_radius,
                               max(3, int(math.ceil(2 * cfg.bubble_radius / 0.05)) + 1))
         bx, by = np.meshgrid(np.linspace(cfg.lidar_offset, cfg.vehicle_front, 3), lateral)
@@ -244,7 +216,7 @@ class GapFollower:
         inside = ((px + cfg.lidar_offset >= -cfg.vehicle_rear)
                   & (px + cfg.lidar_offset <= cfg.vehicle_front)
                   & (np.abs(py) <= cfg.bubble_radius))
-        return PathGeometry(travel, x, y, cosine, sine, pad, np.hypot(px, py),
+        return PathGeometry(travel, x, y, cosine, sine, curvature, np.hypot(px, py),
                             np.arctan2(py, px), inside)
 
     def _unknown_path_blocks(self, valid, geometry, paths):
@@ -294,49 +266,183 @@ class GapFollower:
         return blocked
 
     def _obstacle_points(self, distances, hits, geometry):
-        """Consolidate returns once; keep every occupied cell with bounded error."""
-        cfg = self.config
-        px = distances[hits] * geometry.cosine[hits] + cfg.lidar_offset
-        py = distances[hits] * geometry.sine[hits]
-        cell_size = 0.03
-        cells = np.unique(np.floor(np.column_stack((px, py)) / cell_size), axis=0)
-        px, py = ((cells + 0.5) * cell_size).T
-        return px, py, cell_size / math.sqrt(2)
+        """Enclose every return in tight per-cell measured bounds.
 
-    def _evaluate_paths(self, distances, valid, hits, geometry, paths=None, points=None):
-        """Return observed travel and wall clearance for every steering sample."""
+        The grouping grid limits work, but the whole unmeasured 3 cm cell is
+        not occupied. Its axis-aligned bounds enclose all measured returns,
+        including singleton/thin obstacles; no return is averaged away.
+        """
         cfg = self.config
-        paths = self._paths if paths is None else paths
-        angles = geometry.angles
-        right = np.searchsorted(angles, paths.probe_angle)
+        raw = np.column_stack((distances[hits] * geometry.cosine[hits] + cfg.lidar_offset,
+                               distances[hits] * geometry.sine[hits]))
+        cells, group = np.unique(np.floor(raw / 0.03), axis=0, return_inverse=True)
+        low = np.full((len(cells), 2), np.inf)
+        high = np.full((len(cells), 2), -np.inf)
+        np.minimum.at(low, group, raw)
+        np.maximum.at(high, group, raw)
+        center = (low + high) / 2
+        # Cover roundoff as well as both measured endpoints.
+        half = np.nextafter(np.maximum(center - low, high - center), np.inf)
+        return center[:, 0], center[:, 1], half.T
+
+
+    @staticmethod
+    def _obstacle_padding(cell_pad, cosine, sine):
+        """Project measured AABB support onto body axes; retain scalar callers."""
+        if np.ndim(cell_pad) == 0:
+            return cell_pad, cell_pad
+        half_x, half_y = cell_pad
+        cosine, sine = np.abs(cosine), np.abs(sine)
+        return cosine * half_x + sine * half_y, sine * half_x + cosine * half_y
+
+
+    def _obstacle_clearance(self, local_x, local_y, cosine, sine, cell_pad):
+        """Lower-bound body separation from all represented returns.
+
+        An AABB contains every raw point in its group. Its projection radii
+        give lower bounds on signed separation along both body axes. Taking
+        the larger axis bound remains a lower bound on Euclidean separation;
+        this preserves the interval-motion certificate used below.
+        """
+        cfg = self.config
+        pad_x, pad_y = self._obstacle_padding(cell_pad, cosine, sine)
+        long_gap = np.maximum(-cfg.vehicle_rear - local_x,
+                              local_x - cfg.vehicle_front) - pad_x
+        side_gap = np.abs(local_y) - cfg.bubble_radius - pad_y
+        return np.min(np.maximum(long_gap, side_gap), axis=-1)
+
+    @staticmethod
+    def _cache_path_scan(paths, geometry):
+        """Cache beam lookups only; scan measurements are always evaluated fresh."""
+        if paths.scan_left is not None:
+            return paths
+        angles, probes = geometry.angles, paths.probe_angle
+        right = np.searchsorted(angles, probes)
         left = np.clip(right - 1, 0, angles.size - 1)
         right = np.clip(right, 0, angles.size - 1)
-        observed = ((paths.probe_angle >= angles[0]) & (paths.probe_angle <= angles[-1])
-                    & (angles[right] - angles[left] <= 1.5 * geometry.step)
-                    & valid[left] & valid[right])
+        observed = ((probes >= angles[0]) & (probes <= angles[-1])
+                    & (angles[right] - angles[left] <= 1.5 * geometry.step))
+        return replace(paths, scan_left=left, scan_right=right, scan_observed=observed)
+
+    def _refine_collision_intervals(self, paths, wall_clearance, px, py, cell_pad,
+                                    counts, distances, valid, geometry):
+        """Certify intervals and refine ambiguous near-term collision bounds.
+
+        Each positive clearance is a lower bound on Euclidean distance from
+        the entire padded body to an occupied cell. Body motion changes that
+        separation by at most 1 + corner_radius * abs(curvature) per metre of
+        rear-axle travel. Endpoint bounds c0,c1 cover their whole interval
+        when c0+c1 > rate*ds. A positive initial clearance alone is insufficient.
+
+        Up to five batched bisections resolve ambiguous first-arc intervals
+        in the first 0.3 m. Unresolved intervals remain blocked. Inserted poses
+        must also pass the existing observation and unknown-ray checks.
+        """
+        cfg = self.config
+        if not px.size:
+            return np.zeros(wall_clearance.shape, dtype=bool)
+        out = wall_clearance <= 0.0
+        corner = math.hypot(max(cfg.vehicle_front, cfg.vehicle_rear), cfg.bubble_radius)
+        ds = np.diff(paths.travel)
+        # Retain the generating curvature rather than recovering it from
+        # wrapped headings; use actual sample spacing, not configured maxima.
+        curvature = np.broadcast_to(paths.curvature[:, None], (len(paths.x), len(ds)))
+        lipschitz = 1.0 + corner * np.abs(curvature)
+        pair_clear = ((wall_clearance[:, :-1] > 0.0)
+                      & (wall_clearance[:, 1:] > 0.0)
+                      & (wall_clearance[:, :-1] + wall_clearance[:, 1:]
+                         > lipschitz * ds[None, :] + 1e-9))
+        out[:, 1:] = ~pair_clear
+        eligible = (~pair_clear & (wall_clearance[:, :-1] > 0.0)
+                    & (wall_clearance[:, 1:] > 0.0)
+                    & (paths.travel[None, 1:] <= 0.3 + 1e-9)
+                    & (np.arange(1, paths.travel.size)[None, :] < counts[:, None]))
+        rows, starts = np.where(eligible)
+        if not rows.size:
+            return out
+        # Every subdivision carries its original interval id. Any failed
+        # child rejects that complete interval, including its other children.
+        failed = np.zeros(rows.size, dtype=bool)
+        root = np.arange(rows.size)
+        x0, y0 = paths.x[rows, starts], paths.y[rows, starts]
+        a0 = np.arctan2(paths.sine[rows, starts], paths.cosine[rows, starts])
+        c0, c1 = wall_clearance[rows, starts], wall_clearance[rows, starts + 1]
+        length, kappa = ds[starts], curvature[rows, starts]
+        for depth in range(5):
+            half = length / 2
+            da = kappa * half
+            local_x = half * np.sinc(da / math.pi)
+            local_y = half * np.sin(da / 2) * np.sinc(da / (2 * math.pi))
+            xm = x0 + np.cos(a0) * local_x - np.sin(a0) * local_y
+            ym = y0 + np.sin(a0) * local_x + np.cos(a0) * local_y
+            am = a0 + da
+            cm, sm = np.cos(am), np.sin(am)
+            dx, dy = px[None, :] - xm[:, None], py[None, :] - ym[:, None]
+            lx, ly = dx * cm[:, None] + dy * sm[:, None], -dx * sm[:, None] + dy * cm[:, None]
+            gap = self._obstacle_clearance(lx, ly, cm[:, None], sm[:, None], cell_pad)
+            pose = self._make_paths(np.array([0.0]), xm[:, None], ym[:, None],
+                                    am[:, None], kappa)
+            pose = self._cache_path_scan(pose, geometry)
+            left, right = pose.scan_left, pose.scan_right
+            observed = pose.scan_observed & valid[left] & valid[right]
+            visible = observed & (pose.probe_range <= np.minimum(distances[left], distances[right]))
+            observed_pose = (np.all(visible | pose.probe_inside, axis=(1, 2))
+                             & ~np.any(self._unknown_path_blocks(valid, geometry, pose), axis=1))
+            failed[root[(gap <= 0.0) | ~observed_pose]] = True
+            bound = (1.0 + corner * np.abs(kappa)) * half
+            left_pending = (c0 + gap <= bound + 1e-9) & ~failed[root]
+            right_pending = (gap + c1 <= bound + 1e-9) & ~failed[root]
+            if depth == 4:
+                failed[root[left_pending | right_pending]] = True
+                break
+            if not np.any(left_pending | right_pending):
+                break
+            selected = np.r_[np.flatnonzero(left_pending), np.flatnonzero(right_pending)]
+            x0 = np.r_[x0[left_pending], xm[right_pending]]
+            y0 = np.r_[y0[left_pending], ym[right_pending]]
+            a0 = np.r_[a0[left_pending], am[right_pending]]
+            c0 = np.r_[c0[left_pending], gap[right_pending]]
+            c1 = np.r_[gap[left_pending], c1[right_pending]]
+            length, kappa, root = half[selected], kappa[selected], root[selected]
+        out[rows, starts + 1] = failed
+        return out
+
+    def _evaluate_paths(self, distances, valid, hits, geometry, paths=None, points=None):
+        """Return checked travel and wall clearance within observed free space."""
+        cfg = self.config
+        if paths is None:
+            self._paths = self._cache_path_scan(self._paths, geometry)
+            paths = self._paths
+        else:
+            paths = self._cache_path_scan(paths, geometry)
+        left, right = paths.scan_left, paths.scan_right
+        observed = paths.scan_observed & valid[left] & valid[right]
         visible_range = np.minimum(distances[left], distances[right])
         visible = observed & (paths.probe_range <= visible_range)
         blocked = ~np.all(visible | paths.probe_inside, axis=2)
-        blocked |= self._unknown_path_blocks(valid, geometry, paths)
-
+        unknown_blocked = self._unknown_path_blocks(valid, geometry, paths)
+        blocked |= unknown_blocked
+        visibility_end = np.where(np.any(blocked, axis=1),
+                                  np.argmax(blocked, axis=1), paths.travel.size)
         # All returns, including side/rear returns, constrain the entire body.
         # No-return max-range beams describe free space, not physical walls.
         px, py, cell_pad = (self._obstacle_points(distances, hits, geometry)
                             if points is None else points)
         wall_clearance = np.full(paths.x.shape, cfg.max_lidar_range)
         if px.size:
-            # Consolidate returns into 3 cm cells; retaining each occupied cell
-            # preserves thin obstacles. Expand every collision check by the cell
-            # half-diagonal so this is conservative, not beam subsampling.
-            # A path ends at its first unknown-space sample. Checking obstacles
-            # beyond that point cannot extend it, so omit that work.
+            # Each grouped obstacle encloses all of its actual returns.
+            # Project its tight bounds into each body pose; do not mark the
+            # rest of the grouping cell occupied or discard singleton returns.
+            # Check each arc only as far as its observed free space extends.
             reach = float(np.max(np.hypot(paths.x, paths.y))) + math.hypot(
-                max(cfg.vehicle_front, cfg.vehicle_rear), cfg.bubble_radius) + 1.0 + cell_pad
-            nearby = np.hypot(px, py) <= reach
+                max(cfg.vehicle_front, cfg.vehicle_rear), cfg.bubble_radius) + 1.0
+            radius = (cell_pad if np.ndim(cell_pad) == 0
+                      else np.hypot(cell_pad[0], cell_pad[1]))
+            nearby = np.hypot(px, py) <= reach + radius
             px, py = px[nearby], py[nearby]
-            visible_count = np.where(np.any(blocked, axis=1),
-                                     np.argmax(blocked, axis=1), paths.travel.size)
-            for row, count in enumerate(visible_count):
+            if np.ndim(cell_pad) != 0:
+                cell_pad = cell_pad[:, nearby]
+            for row, count in enumerate(visibility_end):
                 if not px.size:
                     break
                 if count == 0:
@@ -346,16 +452,11 @@ class GapFollower:
                 cosine, sine = paths.cosine[row, :count, None], paths.sine[row, :count, None]
                 local_x = dx * cosine + dy * sine
                 local_y = -dx * sine + dy * cosine
-                long_distance = np.maximum(-cfg.vehicle_rear - local_x,
-                                           local_x - cfg.vehicle_front)
-                side_distance = np.abs(local_y) - cfg.bubble_radius
-                wall_clearance[row, :count] = np.min(
-                    np.maximum(long_distance, side_distance), axis=1) - cell_pad
-            # Padding at s=0 would forbid departures beside a safe nearby wall.
-            pad = np.broadcast_to(paths.sweep_pad[:, None], wall_clearance.shape).copy()
-            at_current_pose = np.hypot(paths.x[:, 0], paths.y[:, 0]) < 1e-9
-            pad[at_current_pose, 0] = 0.0
-            blocked |= wall_clearance <= pad
+                wall_clearance[row, :count] = self._obstacle_clearance(
+                    local_x, local_y, cosine, sine, cell_pad)
+            blocked |= self._refine_collision_intervals(
+                paths, wall_clearance, px, py, cell_pad, visibility_end,
+                distances, valid, geometry)
         first_blocked = np.where(np.any(blocked, axis=1), np.argmax(blocked, axis=1),
                                  paths.travel.size)
         last_free = np.maximum(0, first_blocked - 1)
@@ -394,64 +495,76 @@ class GapFollower:
             np.diff(angles) > 1.5 * step, step, window,
         )
         self._geometry_key, self._geometry = key, geometry
+        # The scan's beam count, ordering or angle increment changed. Cached
+        # indices from the previous layout must not address the new scan.
+        self._paths = replace(self._paths, scan_left=None, scan_right=None,
+                              scan_observed=None)
         return geometry
 
-    def _score_continuations(self, distances, valid, hits, geometry, travel, base_score, points):
-        """Look beyond each first arc, using a shorter switch in confined space."""
+    def _prefer_inner_wall(self, scores, travel, points):
+        """Favor a supported inside wall among comparable checked steering arcs."""
         cfg = self.config
-        switches = np.full(travel.shape, self._branch_choices[0])
-        for branch in self._branch_choices:
-            switches = np.where(travel >= branch + cfg.path_step / 2, branch, switches)
-        eligible = travel >= switches + cfg.path_step / 2
-        planned_distance = travel.copy()
-        next_curvature = np.abs(self._curvature).copy()
-        if not np.any(eligible):
-            return base_score, planned_distance, next_curvature, switches
-        roots = []
-        previous = int(np.argmin(np.abs(self._steering - self._previous_steering)))
-        for index in (int(np.argmax(np.where(eligible, base_score, -np.inf))),
-                      previous, 0, len(travel) - 1, len(travel) // 2):
-            if eligible[index] and index not in roots:
-                roots.append(index)
-        for index in np.argsort(-np.where(eligible, base_score, -np.inf)):
-            if len(roots) >= 5:
-                break
-            if eligible[index] and all(abs(self._steering[index] - self._steering[root]) >= 0.10
-                                       for root in roots):
-                roots.append(int(index))
-        scores = base_score.copy()
-        advantage = np.full(travel.shape, -np.inf)
-        for branch in self._branch_choices:
-            # In contracting space, compare an earlier steering change even
-            # when the nominal switch is still reachable. Otherwise a weak
-            # first arc can conceal the need to tighten the turn before 0.9 m.
-            group = [root for root in roots
-                     if travel[root] >= branch + cfg.path_step / 2
-                     and (switches[root] == branch
-                          or (np.max(travel) < 2.5 and branch >= min(0.3, cfg.branch_distance)))]
-            if not group:
-                continue
-            indices = (np.array(group)[:, None] * 5 + np.arange(5)).ravel()
-            paths = self._continuations[float(branch)].select(indices)
-            onward, _ = self._evaluate_paths(distances, valid, hits, geometry,
-                                             paths=paths, points=points)
-            last = np.searchsorted(paths.travel, onward, side='right') - 1
-            row = np.arange(len(onward))
-            displacement = np.hypot(paths.x[row, last], paths.y[row, last])
-            effective = np.minimum(onward + branch, displacement * 1.5 + 0.5)
-            onward_score = (3.0 * effective / cfg.planning_horizon
-                            - 0.10 * np.abs(np.tile(self._next_steering, len(group)))
-                            / cfg.max_steering_angle)
-            for i, root in enumerate(group):
-                choice = int(np.argmax(onward_score[i * 5:(i + 1) * 5]))
-                value = float(onward_score[i * 5 + choice])
-                if value > advantage[root]:
-                    advantage[root] = value
-                    scores[root] = base_score[root] + max(0.0, value)
-                    planned_distance[root] = branch + onward[i * 5 + choice]
-                    next_curvature[root] = abs(math.tan(self._next_steering[choice]) / cfg.wheelbase)
-                    switches[root] = branch
-        return scores, planned_distance, next_curvature, switches
+        feasible = np.isfinite(scores) & (travel > 1e-9)
+        if cfg.inner_wall_bias == 0 or not np.any(feasible):
+            return scores
+        baseline = int(np.argmax(np.where(feasible, scores, -np.inf)))
+        if abs(self._steering[baseline]) < 0.10:
+            return scores
+        direction = float(np.sign(self._steering[baseline]))
+        px, py, cell_pad = points
+        if px.size < 3:
+            return scores
+
+        def wall_error(root):
+            gaps = []
+            bank = self._paths
+            samples = np.array([0.3, 0.6, 0.9])
+            samples = samples[samples <= travel[root] + 1e-9]
+            indices = np.unique(np.searchsorted(bank.travel, samples + 1e-9, side='right') - 1)
+            for index in indices[indices > 0]:
+                cosine, sine = bank.cosine[root, index], bank.sine[root, index]
+                dx, dy = px - bank.x[root, index], py - bank.y[root, index]
+                local_x = dx * cosine + dy * sine
+                local_y = direction * (-dx * sine + dy * cosine)
+                side = ((local_x >= -cfg.vehicle_rear)
+                        & (local_x <= cfg.vehicle_front)
+                        & (local_y >= cfg.bubble_radius)
+                        & (local_y <= cfg.bubble_radius + 1.0))
+                # An isolated return or a distant outer wall is not an inside wall.
+                if np.count_nonzero(side) < 3 or np.ptp(local_x[side]) < 0.15:
+                    continue
+                _, side_pad = self._obstacle_padding(cell_pad, cosine, sine)
+                gaps.append(float(np.min((local_y - cfg.bubble_radius - side_pad)[side])))
+            if len(gaps) < 2:
+                return None
+            gaps = np.asarray(gaps)
+            error = np.where(gaps < cfg.inner_wall_clearance,
+                             2 * (cfg.inner_wall_clearance - gaps),
+                             gaps - cfg.inner_wall_clearance)
+            return float(np.mean(error))
+
+        baseline_error = wall_error(baseline)
+        if baseline_error is None:
+            return scores
+        # Preserve braking room for the original arc's steady speed ceiling;
+        # a recent stop must not let the preference accept a much shorter path.
+        at = cfg.braking_decel * cfg.reaction_time
+        reference_speed = min(
+            cfg.max_speed,
+            math.sqrt(at * at + 2 * cfg.braking_decel * travel[baseline]) - at,
+            math.sqrt(cfg.max_lateral_accel / max(abs(self._curvature[baseline]), 1e-6)))
+        required_travel = (reference_speed * cfg.reaction_time
+                           + reference_speed ** 2 / (2 * cfg.braking_decel))
+        comparable = (feasible & (direction * self._steering >= 0.10)
+                      & (travel >= travel[baseline] - 0.10 - 1e-9)
+                      & (travel >= required_travel - 1e-9))
+        biased = scores.copy()
+        for root in np.flatnonzero(comparable):
+            error = baseline_error if root == baseline else wall_error(int(root))
+            if error is not None:
+                improvement = np.clip((baseline_error - error) / 0.10, 0.0, 1.0)
+                biased[root] += 0.4 * cfg.inner_wall_bias * improvement
+        return biased
 
     def _inflate_edges(self, processed, distances, valid, geometry):
         """Extend a nearby obstacle edge into its neighboring farther readings."""
@@ -566,35 +679,26 @@ class GapFollower:
         preferred = math.atan2(2 * cfg.wheelbase * ty, tx * tx + ty * ty)
         points = self._obstacle_points(distances, hits, geometry)
         travel, comfort = self._evaluate_paths(distances, valid, hits, geometry, points=points)
-        feasible = travel > cfg.stop_distance + 1e-9
+        feasible = travel > 1e-9
         if not np.any(feasible):
             return self.stop('no_safe_path', clearance, float(np.max(travel)), preserve_steering=True)
-        score = (1.0 * np.minimum(travel / 1.2, 1.0) + 1.2 * comfort
+        # Each arc is a complete candidate, so reward its full checked travel.
+        score = (travel / cfg.path_horizon + 1.2 * comfort
                  - 0.35 * np.abs(self._steering - preferred) / cfg.max_steering_angle
                  - 0.15 * np.abs(self._steering - self._previous_steering) / cfg.max_steering_angle
                  - 0.05 * np.abs(self._steering) / cfg.max_steering_angle)
-        score, planned_distance, next_curvature, switches = self._score_continuations(
-            distances, valid, hits, geometry, travel, score, points)
+        score = self._prefer_inner_wall(score, travel, points)
         best = int(np.argmax(np.where(feasible, score, -np.inf)))
         steering, path_clearance = float(self._steering[best]), float(travel[best])
-        available = max(0.0, path_clearance - cfg.stop_distance)
         # Solve v*latency + v^2/(2*deceleration) <= available path distance.
         at = cfg.braking_decel * cfg.reaction_time
-        brake_speed = math.sqrt(at * at + 2 * cfg.braking_decel * available) - at
+        brake_speed = math.sqrt(at * at + 2 * cfg.braking_decel * path_clearance) - at
         lateral_speed = math.sqrt(cfg.max_lateral_accel / max(abs(self._curvature[best]), 1e-6))
-        # Begin slowing before the planned tighter turn. This only lowers the
-        # first-arc speed bound; future clearance can never authorize more speed.
-        future_lateral_speed = math.sqrt(cfg.max_lateral_accel / max(next_curvature[best], 1e-6))
-        entry_speed = math.sqrt(at * at + future_lateral_speed ** 2
-                                + 2 * cfg.braking_decel * switches[best]) - at
         cruise_speed = max(cfg.min_speed, cfg.max_speed * min(1.0, path_clearance / cfg.slow_distance))
-        speed = min(cfg.max_speed, cruise_speed, brake_speed, lateral_speed, entry_speed,
+        speed = min(cfg.max_speed, cruise_speed, brake_speed, lateral_speed,
                     self._previous_speed + cfg.max_acceleration * min(dt, 0.1))
-        if path_clearance < cfg.min_path_distance + 1e-9:
-            speed = min(speed, cfg.crawl_speed)
         self._previous_speed, self._previous_steering = float(speed), steering
-        return GapCommand(steering, float(speed), 'ok', target, clearance,
-                          path_clearance, float(planned_distance[best]))
+        return GapCommand(steering, float(speed), 'ok', target, clearance, path_clearance)
 
 
 def scan_timestamp_status(stamp_ns, now_ns, timeout):
@@ -665,7 +769,6 @@ def build_ros_node_class():
                     f'path={command.path_clearance:.2f} m, speed={command.speed:.2f} m/s')
             self.get_logger().debug(
                 f'front={command.front_clearance:.2f} path={command.path_clearance:.2f} '
-                f'plan={command.planning_clearance:.2f} '
                 f'target={command.target_angle:.3f} steer={command.steering_angle:.3f} '
                 f'speed={command.speed:.2f}', throttle_duration_sec=1.0)
 
@@ -683,6 +786,14 @@ def build_ros_node_class():
                 command = self.controller.compute(
                     scan.ranges, scan.angle_min, scan.angle_increment,
                     scan.range_min, scan.range_max, dt=dt)
+                # A long callback can outlive the scan's freshness budget; the
+                # timer cannot interrupt it. Recheck before publishing motion.
+                status = scan_timestamp_status(
+                    stamp_ns, self.get_clock().now().nanoseconds, self.scan_timeout)
+                if status is not None:
+                    command = self.controller.stop(status)
+                elif time.monotonic() - received > self.scan_timeout:
+                    command = self.controller.stop('scan_timeout')
             except Exception as error:
                 # A callback failure must not leave the previous moving command
                 # as our most recent output. KeyboardInterrupt is not swallowed.
@@ -713,7 +824,8 @@ def self_test():
     for value in (0.0, np.nan, np.inf, -np.inf):
         assert command(np.full(angles.size, value)).speed == 0
     blocked = np.full(angles.size, 4.0)
-    blocked[np.abs(angles) < math.radians(10)] = 0.35
+    # Occupy the current body so there is no checked travel toward the wall.
+    blocked[np.abs(angles) < math.radians(10)] = 0.10
     assert command(blocked).speed == 0
     assert scan_timestamp_status(1_000_000_000, 2_000_000_000, 0.3) == 'stale_scan'
     print('Self-test passed: corridor, invalid data, front stop, timestamp check.')

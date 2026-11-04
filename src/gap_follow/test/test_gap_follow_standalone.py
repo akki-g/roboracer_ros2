@@ -158,33 +158,33 @@ class GapFollowerTests(unittest.TestCase):
                 self.assertGreater(command.speed, 0)
                 self.assertLess(offset * command.steering_angle, 0)
 
-    def test_blocked_corridor_stops(self):
-        walls = np.concatenate((corridor(), [[[0.55, -1.0], [0.55, 1.0]]]))
+    def test_corridor_without_a_checked_departure_stops(self):
+        # The wall clears the current body but leaves less than one path step.
+        walls = np.concatenate((corridor(), [[[0.48, -1.0], [0.48, 1.0]]]))
         command = compute(GapFollower(), raycast(walls))
+        self.assertEqual(command.path_clearance, 0.0)
         self.assertEqual(command.speed, 0)
 
-    def test_short_checked_path_allows_braking_bounded_crawl(self):
-        # A nearby wall leaves 0.2 m of checked travel: less than the normal
-        # planning threshold, but more than the stopping reserve. The previous
-        # 0.3 m hard cutoff unnecessarily deadlocked this situation.
+    def test_short_checked_path_allows_braking_bounded_motion(self):
+        # A nearby wall leaves 0.2 m of checked travel. Braking distance,
+        # including reaction time, must bound speed even below nominal min_speed.
         config = GapConfig(min_speed=0.4, braking_decel=0.5, reaction_time=0.5)
         follower = GapFollower(config)
         for _ in range(5):
             previous = compute(follower, raycast(corridor()), dt=0.1)
         walls = np.concatenate((corridor(), [[[0.72, -1.0], [0.72, 1.0]]]))
         command = compute(follower, raycast(walls), dt=0.1)
-        self.assertGreater(command.path_clearance, config.stop_distance)
-        self.assertLess(command.path_clearance, config.min_path_distance)
+        self.assertGreater(command.path_clearance, 0.0)
+        self.assertLess(command.path_clearance, 0.3)
         self.assertGreater(command.speed, 0)
         self.assertLess(command.speed, previous.speed)
-        self.assertLessEqual(command.speed, config.crawl_speed)
         self.assertLess(command.speed, config.min_speed)
         stopping_distance = (command.speed * config.reaction_time
                              + command.speed ** 2 / (2 * config.braking_decel))
         self.assertLessEqual(stopping_distance,
-                             command.path_clearance - config.stop_distance + 1e-9)
+                             command.path_clearance + 1e-9)
 
-    def test_crawl_never_overrides_an_occupied_footprint(self):
+    def test_occupied_footprint_stops_immediately(self):
         follower = GapFollower()
         moving = compute(follower, raycast(corridor()))
         self.assertGreater(moving.speed, 0)
@@ -199,7 +199,7 @@ class GapFollowerTests(unittest.TestCase):
         turning = compute(follower, raycast(corridor(), (0.0, -0.55, 0.0)))
         self.assertGreater(turning.speed, 0)
         self.assertGreater(turning.steering_angle, 0)
-        walls = np.concatenate((corridor(), [[[0.55, -1.0], [0.55, 1.0]]]))
+        walls = np.concatenate((corridor(), [[[0.48, -1.0], [0.48, 1.0]]]))
         blocked = compute(follower, raycast(walls))
         self.assertEqual(blocked.speed, 0)
         # A short visibility/clearance interruption should not unwind the
@@ -209,15 +209,15 @@ class GapFollowerTests(unittest.TestCase):
         self.assertEqual(invalid.speed, 0)
         self.assertEqual(invalid.steering_angle, 0)
 
-    def test_continuation_and_crawl_configuration_rejects_invalid_limits(self):
+    def test_path_configuration_rejects_invalid_limits(self):
         invalid_settings = (
-            {'planning_horizon': 2.0},  # Cannot be shorter than the first arc.
-            {'planning_horizon': 11.0},  # Cannot extend past the sensor cap.
-            {'branch_distance': 0.2},
-            {'branch_distance': 3.0},
+            {'path_horizon': 0.0},
+            {'path_horizon': 11.0},  # Cannot extend past the sensor cap.
+            {'path_step': 0.0},
+            {'path_step': 3.1},
             {'comfort_clearance': 0.0},
-            {'crawl_speed': -0.1},
-            {'crawl_speed': float('nan')},
+            {'braking_decel': -0.1},
+            {'reaction_time': float('nan')},
         )
         for settings in invalid_settings:
             with self.subTest(settings=settings), self.assertRaises(ValueError):
@@ -321,7 +321,7 @@ class GapFollowerTests(unittest.TestCase):
         stopping_distance = (command.speed * config.reaction_time
                              + command.speed ** 2 / (2 * config.braking_decel))
         self.assertLessEqual(stopping_distance,
-                             command.path_clearance - config.stop_distance + 1e-9)
+                             command.path_clearance + 1e-9)
 
     def test_left_and_right_hairpin_rollouts(self):
         for direction in (-1, 1):
