@@ -1,0 +1,1 @@
+/root/ros2_ws/build_docker/vesc_msgs/rosidl_generator_rs/vesc_msgs/rust/src/lib.rs

@@ -1,0 +1,1 @@
+/root/ros2_ws/build_docker/vesc_msgs/rosidl_generator_c/vesc_msgs/msg/detail/vesc_state__functions.h

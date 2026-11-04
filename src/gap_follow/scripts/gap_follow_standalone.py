@@ -683,7 +683,7 @@ class GapFollower:
         if not np.any(feasible):
             return self.stop('no_safe_path', clearance, float(np.max(travel)), preserve_steering=True)
         # Each arc is a complete candidate, so reward its full checked travel.
-        score = (travel / cfg.path_horizon + 1.2 * comfort
+        score = (2.0 * travel / cfg.path_horizon + 1.2 * comfort
                  - 0.35 * np.abs(self._steering - preferred) / cfg.max_steering_angle
                  - 0.15 * np.abs(self._steering - self._previous_steering) / cfg.max_steering_angle
                  - 0.05 * np.abs(self._steering) / cfg.max_steering_angle)
