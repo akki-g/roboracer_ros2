@@ -3,8 +3,9 @@
 #   ros2 launch rl_policy policy.launch.py mode:=sim policy_path:=<policy.npz>
 # Differences from sim.yaml, so the sim matches what the policy was trained on:
 #  - a held-out training map (Duct1077, 2.2 m wide generated duct track)
-#  - the Hokuyo UST-10LX beam layout: 1081 beams over 4.7124 rad (0.25 deg),
-#    which the policy subsamples at indices 0, 10, ..., 1080
+#  - scan_fov / scan_beams state the sim's real LiDAR (f1tenth_gym always
+#    casts 1080 beams over 4.7 rad; these keys only set the LaserScan
+#    metadata). rl_policy's sim config resamples to the policy's 109 angles.
 #  - LiDAR 0.1037 m ahead of the sim's reference point: the classic gym's
 #    state is the CG (single-track model) and the real LiDAR sits 0.275 m
 #    ahead of the rear axle, lr = 0.1713 m behind the CG
@@ -18,8 +19,8 @@ bridge:
     sy: 3.5881
     stheta: 3.0314
 
-    scan_fov: 4.7124
-    scan_beams: 1081
+    scan_fov: 4.7
+    scan_beams: 1080
     scan_distance_to_base_link: 0.1037
 
     kb_teleop: True

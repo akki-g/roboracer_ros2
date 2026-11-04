@@ -33,6 +33,14 @@ from .safety import DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, 
 
 SCAN_ANGLE_TOL = 0.01  # rad, on angle_min
 SCAN_INCREMENT_TOL = 2e-5  # rad; f1tenth_gym_ros publishes fov/N instead of fov/(N-1)
+POLICY_ANGLES = -ob.FOV / 2 + np.arange(ob.NUM_BEAMS) * (ob.FOV / (ob.NUM_BEAMS - 1))
+
+
+def resample_indices(angle_min, angle_increment, n):
+    """Nearest beam of an n-beam scan to each policy angle, and the worst angle error."""
+    idx = np.clip(np.rint((POLICY_ANGLES - angle_min) / angle_increment), 0, n - 1).astype(int)
+    err = np.max(np.abs(angle_min + idx * angle_increment - POLICY_ANGLES))
+    return idx, float(err)
 
 
 class PolicyNode(Node):
@@ -50,6 +58,11 @@ class PolicyNode(Node):
         self.declare_parameter("scan_timeout", 0.1)
         self.declare_parameter("odom_timeout", 0.2)
         self.declare_parameter("enabled", True)
+        # Off on the car: anything but the UST-10LX's 1081 beams stops the car.
+        # On in the ROS sim, whose LiDAR is fixed at 1080 beams over 4.7 rad:
+        # take the nearest beam to each policy angle if within resample_tol_deg.
+        self.declare_parameter("scan_resample", False)
+        self.declare_parameter("resample_tol_deg", 0.5)
 
         self.safety = self._safety_config()
         self.safety.validate()
@@ -75,6 +88,10 @@ class PolicyNode(Node):
 
         self.scan = None  # (receive time, ranges ndarray, angles ndarray, range_min)
         self.scan_ok = False
+        self.scan_idx = ob.CAR_BEAM_INDICES
+        self.scan_resample = bool(self.get_parameter("scan_resample").value)
+        self.resample_tol = math.radians(float(self.get_parameter("resample_tol_deg").value))
+        self._layout = None
         self.odom = None  # (receive time, speed)
         self.stack = None
         self.prev_action = ob.reset_action()
@@ -114,7 +131,8 @@ class PolicyNode(Node):
                 current[p.name] = p.value
             elif p.name == "enabled":
                 enabled = bool(p.value)
-            elif p.name in ("scan_topic", "odom_topic", "drive_topic", "debug_topic", "policy_path"):
+            elif p.name in ("scan_topic", "odom_topic", "drive_topic", "debug_topic", "policy_path",
+                            "scan_resample", "resample_tol_deg"):
                 return SetParametersResult(successful=False, reason=f"{p.name} is fixed at start-up")
         try:
             cfg = self._safety_config(current)
@@ -139,16 +157,30 @@ class PolicyNode(Node):
         now = self.get_clock().now().nanoseconds * 1e-9
         ranges = np.asarray(msg.ranges, dtype=np.float32)
         n = len(ranges)
-        ok = (
-            n == ob.CAR_SCAN_BEAMS
-            and abs(msg.angle_min + ob.FOV / 2) < SCAN_ANGLE_TOL
-            and abs(msg.angle_increment - ob.FOV / (ob.CAR_SCAN_BEAMS - 1)) < SCAN_INCREMENT_TOL
-        )
-        if not ok:
-            self.get_logger().error(
-                f"scan layout {n} beams, angle_min {msg.angle_min:.4f}, increment {msg.angle_increment:.6f} "
-                f"!= expected {ob.CAR_SCAN_BEAMS} beams over {ob.FOV} rad; commanding speed 0",
-                throttle_duration_sec=2.0)
+        layout = (n, msg.angle_min, msg.angle_increment)
+        if layout != self._layout:  # validate once per layout
+            self._layout = layout
+            ust10lx = (
+                n == ob.CAR_SCAN_BEAMS
+                and abs(msg.angle_min + ob.FOV / 2) < SCAN_ANGLE_TOL
+                and abs(msg.angle_increment - ob.FOV / (ob.CAR_SCAN_BEAMS - 1)) < SCAN_INCREMENT_TOL
+            )
+            if ust10lx:
+                self.scan_idx, self._layout_ok = ob.CAR_BEAM_INDICES, True
+            elif self.scan_resample and n > 1 and msg.angle_increment > 0:
+                self.scan_idx, err = resample_indices(msg.angle_min, msg.angle_increment, n)
+                self._layout_ok = err <= self.resample_tol
+                log = self.get_logger().warn if self._layout_ok else self.get_logger().error
+                log(f"scan has {n} beams from {msg.angle_min:.4f} rad: resampling to the policy's "
+                    f"{ob.NUM_BEAMS} angles, worst error {math.degrees(err):.2f} deg "
+                    f"({'ok' if self._layout_ok else 'too large, commanding speed 0'})")
+            else:
+                self._layout_ok = False
+            if not self._layout_ok and not self.scan_resample:
+                self.get_logger().error(
+                    f"scan layout {n} beams, angle_min {msg.angle_min:.4f}, increment {msg.angle_increment:.6f} "
+                    f"!= expected {ob.CAR_SCAN_BEAMS} beams over {ob.FOV} rad; commanding speed 0")
+        ok = self._layout_ok
         angles = msg.angle_min + np.arange(n) * msg.angle_increment
         self.scan = (now, ranges, angles, float(msg.range_min))
         self.scan_ok = ok
@@ -175,7 +207,7 @@ class PolicyNode(Node):
 
         if usable and fresh:
             _, ranges, _, _ = self.scan
-            scan_norm = ob.normalize_scan(ob.subsample_scan(ranges))
+            scan_norm = ob.normalize_scan(ranges[self.scan_idx])
             if not self.active:  # (re)activation: fresh stack, stopped previous action
                 self.stack = ob.init_stack(scan_norm)
                 self.prev_action = ob.reset_action()

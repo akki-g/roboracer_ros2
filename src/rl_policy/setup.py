@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'policy_node = rl_policy.policy_node:main',
+            'stage0_monitor = rl_policy.stage0_monitor:main',
         ],
     },
 )
