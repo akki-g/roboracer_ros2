@@ -1,6 +1,6 @@
 # Phase 1 RL: Results Note
 
-Nov 4, 2026. Companion to [rl_phase1_spec.md](rl_phase1_spec.md); section numbers below refer to the spec.
+Nov 4, 2026; Newton results added Nov 5. Companion to [rl_phase1_spec.md](rl_phase1_spec.md); section numbers below refer to the spec.
 
 ## Status at a glance
 
@@ -12,11 +12,11 @@ Nov 4, 2026. Companion to [rl_phase1_spec.md](rl_phase1_spec.md); section number
 | 4. `maps.py`: racetracks, narrow tracks, fixed lists (4.3) | Done |
 | 5. `train_ppo.py`, `evaluate.py`, 5-minute CPU run with 64 envs | Done |
 | 6. Parity against the classic f1tenth_gym (6) | Passes: 1.6e-5 m and 2.4e-6 rad over 200 steps, gate 0.05 |
-| 7. Slurm smoke job and 12 h job | Written, not submitted (no cluster access). Commands are below. |
+| 7. Slurm smoke job and 12 h job | Smoke run passes on a Newton H100 (job 1164498). 12 h job 1164683 submitted with `total_timesteps` 1.18e9 from the measured 2048-env rate. |
 | 8. `export_policy.py`, `rl_policy` node and safety layer, ROS sim test | Done. Stage 0 passes with the 5-minute CPU checkpoint: 3.8 laps in 90 s at `max_speed` 3.0. |
 | 9. This note | Done |
 
-**Every check in spec section 6 is a pytest and passes.** 56 tests in `rl/tests/`, plus 9 safety-layer tests in `src/rl_policy/test/`. No long run has started; the Newton smoke run is next.
+**Every check in spec section 6 is a pytest and passes**, on the Mac and on a Newton H100 node (job 1164445). 57 tests in `rl/tests/`, plus 9 safety-layer tests in `src/rl_policy/test/`. The 12 h run is in progress.
 
 ## Repos and branches
 
@@ -87,7 +87,7 @@ An ament_python package with one node, `policy_node`, configured per mode by `co
 
 ## Test results
 
-### Spec section 6 checks (`uv run pytest -q rl/tests`: 56 passed)
+### Spec section 6 checks (`uv run pytest -q rl/tests`: 57 passed)
 
 | Check | Test | Result |
 |---|---|---|
@@ -99,7 +99,7 @@ An ament_python package with one node, `policy_node`, configured per mode by `co
 | Observation shape and range | `test_observation_shape_and_range` | (330,); scans in [0, 1]; frames shift newest-first; speed and previous action in place |
 | Shared observation code | `test_obs.py::test_shared_observation_code` | The car's `obs.py` is byte-identical, and output is identical on 100 recorded inputs (1081-beam sim scans with injected inf/NaN). The JAX trace agrees within 1e-7. |
 | Beam angle match | `test_beam_angle_match` | Sim beams vs the car's indices 0, 10, …, 1080 (urg_node metadata): max difference 5.5e-6 rad, gate 1e-4 |
-| Parity (6) | `test_parity.py` | First 200 steps: 1.55e-5 m and 2.37e-6 rad (gate 0.05 / 0.05). All 500 steps: 9.7e-5 m and 8.3e-6 rad. |
+| Parity (6) | `test_parity.py` | First 200 steps: 1.55e-5 m and 2.37e-6 rad (gate 0.05 / 0.05). All 500 steps: 9.7e-5 m and 8.3e-6 rad. On Newton (Linux x86): 1.42e-5 m and 1.89e-6 rad; 7.85e-5 m and 7.14e-6 rad. |
 | Export (7.1) | `test_export.py` | NumPy vs JAX `tanh(mean)` on 1000 observations: max difference under 1e-5. The car's copy is byte-identical. |
 
 Before the classic controller (D3), parity failed at **0.24 m by step 25 and 0.64 m by step 200**, with all of the gap in the command-to-actuation controller. Running the JAX dynamics through classic's controller gave 0.0000 m, which is how the cause was isolated.
@@ -126,6 +126,18 @@ Command: `python -m rl.train_ppo --num-envs 64 --time-limit 300 --eval-max-steps
 
 This is a 5-minute smoke result on 60 episodes per setting, not the phase-1 result. Spielberg, the longest held-out track, is the weak spot under randomization. Mean speed is 5.6–5.8 m/s on racetracks; the deterministic policy is faster than the noisy training policy.
 
+### Newton smoke run (256 envs, H100 PCIe)
+
+Job 1164498, `sbatch --time=00:20:00 --export=ALL,MODE=smoke slurm/train_phase1.sbatch`, after the test gate (job 1164445: 57 passed). Run `runs/smoke/20261105_6627c64063` on Newton.
+
+- **Environment:** H100 PCIe 80 GB, driver 580.105.08 (CUDA 13.0); JAX 0.7.2 with the cuda13 wheels sees `CudaDevice(id=0)`. All 22 tracks match the manifest hashes recorded on the Mac.
+- **Timing:** setup 97 s, first update 224 s (XLA compile), then 6,500–7,200 env-steps/s; 40 updates (2.6 M steps) in the 10-minute limit, then a 66 s held-out eval.
+- **Learning:** return −0.79 → 7.39, episode length 95 → 657 steps, collision rate at episode end 1.00 → 0.47, lap-progress 0.03 → 1.24 laps. No NaNs.
+- **`check_smoke.py`: SMOKE RUN PASSED.** Sampled parameters vary (std: μ 0.105, m 0.164, delay 0.81), with 10,620 episodes logged alongside their draws. Two checkpoints and one eval report. Nominal held-out eval at update 40: completion 1.00.
+- The job itself hit its 20-minute wall clock: after training, eval, checkpoints and `wandb.finish()`, the process sat under `srun` for 7 minutes (D19). `check_smoke.py` was then run by hand on the finished run directory.
+
+A separate 5-minute probe at the full job's **2048 envs** (job 1164501, `runs/sps2048/20261105_2bc32107de`) measured **31,736 env-steps/s** (16.5 s per update, 204 s compile update, 60 s eval) and exited cleanly without `srun`. That rate sets the 12 h budget (D20).
+
 ### ROS sim (stage 0) with the CPU checkpoint
 
 Setup: the roboracer dev image (classic gym `4fdb9c7`, bridge `883394d`); `./start_sim.sh sim/sim_rl.yaml` on held-out Duct1077; `ros2 launch rl_policy policy.launch.py mode:=sim …`.
@@ -144,7 +156,7 @@ Setup: the roboracer dev image (classic gym `4fdb9c7`, bridge `883394d`); `./sta
 - `steer_limit 0.6`, `max_speed −1` and changing `scan_resample` at runtime were all rejected.
 - Before the sim tolerance was set (D14), the node correctly refused the sim's scan layout and held speed 0.
 
-Bags (`/scan`, `/ego_racecar/odom`, `/drive`, `/policy_node/debug`) and node logs from these runs are local, not committed (350 MB).
+Bags (`/scan`, `/ego_racecar/odom`, `/drive`, `/policy_node/debug`) and node logs from these runs were kept in a temporary directory that has since been cleared; rerun the commands below to regenerate them.
 
 ### Car-side unit tests
 
@@ -155,9 +167,10 @@ Bags (`/scan`, `/ego_racecar/odom`, `/drive`, `/policy_node/debug`) and node log
 | Where | Envs | env-steps/s |
 |---|---|---|
 | Mac CPU (M5 Max), full multi-map phase-1 env, PPO included | 64 | 5,466 |
-| Newton H100 | 256 / 2048 | **not measured: needs the smoke run** |
+| Newton H100 PCIe, same env and PPO (smoke run) | 256 | 6,819 |
+| Newton H100 PCIe, same env and PPO (probe) | 2048 | **31,736** |
 
-`check_smoke.py` prints the `total_timesteps` that fits the 12 h job from the smoke run's rate.
+GPU throughput grows with env count: 2048 envs run 4.7× faster than 256. The first update (XLA compile) takes 204–224 s on the H100. **12 h budget:** 31,736 × 41,400 s × 0.9 = **1.18e9** env-steps, 2,250 updates; with an eval every 50 updates the run ends about 22 minutes before its 11.5 h time limit.
 
 ## Commands to reproduce
 
@@ -175,15 +188,16 @@ uv run python -m rl.evaluate --checkpoint runs/cpu5min/<run>/best.safetensors --
 uv run python -m rl.export_policy runs/<…>/best.safetensors --out ../roboracer_ros2/src/rl_policy/models/policy.npz
 ```
 
-**Newton** (not submitted: no cluster access from this session):
+**Newton** (as run; repos cloned side by side into `~/carvel/`):
 ```bash
-bash slurm/setup_newton.sh          # login node: uv, CUDA JAX, maps, the car repo, full pytest gate
-sbatch --time=00:20:00 --export=ALL,MODE=smoke slurm/train_phase1.sbatch     # 256 envs, 10 min
-uv run python -m rl.check_smoke runs/smoke/<run>                             # pass/fail + 12 h step budget
-sbatch --export=ALL,MODE=full,TOTAL_TIMESTEPS=<budget> slurm/train_phase1.sbatch   # 2048 envs, 12 h, resumable
+bash slurm/setup_newton.sh          # login node: uv (throttled), CUDA JAX, maps, the car repo, classic gym
+GATE=$(sbatch --parsable slurm/gate_tests.sbatch)                                   # section 6 tests on an H100 node
+sbatch --dependency=afterok:$GATE --time=00:20:00 --export=ALL,MODE=smoke slurm/train_phase1.sbatch   # 256 envs, 10 min
+uv run python -m rl.check_smoke runs/smoke/<run>                                   # pass/fail
+sbatch --export=ALL,MODE=full,TOTAL_TIMESTEPS=1.18e9 slurm/train_phase1.sbatch     # 2048 envs, 12 h, resumable
 wandb sync runs/phase1/<run>/wandb/offline-run-*
 ```
-Before submitting, check three site-specific lines in `train_phase1.sbatch`: `--constraint=h100`, and the commented `--partition`/`--account`. The cuda13 JAX wheels need an NVIDIA driver ≥ 580; with an older driver, install `jax[cuda12]==0.7.2`, as noted in `setup_newton.sh`. The full job stops itself at 11.5 h with a checkpoint. A requeue or resubmission with the same settings resumes from `latest.safetensors`.
+Newton specifics: the H100 nodes carry the `h100` feature; `normal` is the default partition and `cenyioha` the only account, so no partition or account lines are needed. Newton's login nodes limit each user to 4 GB of virtual memory and 100 processes, so `setup_newton.sh` throttles uv and does not run the tests there (D18). The full job stops itself at 11.5 h with a checkpoint. A requeue or resubmission with the same settings resumes from `latest.safetensors`.
 
 **ROS sim** (dev container):
 ```bash
@@ -233,10 +247,13 @@ D1–D4 were raised mid-task as spec problems, with a proposed change each, and 
 15. **D15: Scan offset uses nominal lr** (0.1037 m), not each episode's sampled lr. The difference is under 2 cm at ±2σ.
 16. **D16: Wrapper structure.** The five wrapper stages are one `Phase1Wrapper` class with one function per stage, each unit-tested, rather than five wrapper classes. Auto-reset and episode statistics are simpler in one place.
 17. **D17: The 5-minute CPU run** evaluated with `eval_max_steps` 1500, to keep evaluation short on CPU. The tables above re-evaluate `best` with the standard 6000.
+18. **D18: The test gate runs as a Slurm job.** Spec section 6 checks must pass before training, and `setup_newton.sh` originally ran them on the login node. Newton's login nodes cap users at 4 GB of virtual memory and 100 processes; `uv sync` aborted with its default thread pools, and JAX-based tests cannot run there. `slurm/gate_tests.sbatch` runs the same `pytest rl/tests` (CPU JAX) on an H100 node and exits non-zero on failure, so the smoke run can wait on it with `afterok`. The first gate run also exposed that `test_maps.py` imported matplotlib, which only the `examples` extra installs; the test now uses a small NumPy point-in-polygon check (it agrees with matplotlib on 22 maps × 2001 points).
+19. **D19: No `srun` in the training job.** Under `srun`, the smoke job finished training, eval, checkpoints and `wandb.finish()`, then sat for 7 minutes until the wall clock killed it, so its `check_smoke.py` step never ran. The 2048-env probe, launched directly in the batch script on the same node type, exited cleanly. Most likely a leftover child process (wandb's service) held the step's output open. One task per job, so `srun` is not needed. The training job also now checks every track file's hash against the manifest before starting, searching the env's own map directories (Spielberg ships in the repo's bundled `maps/`).
+20. **D20: The 12 h budget comes from a 2048-env probe, not the 256-env smoke run.** Section 5 says the smoke run's steps per second set `total_timesteps`. On the GPU the rate grows with env count (6,819 at 256 envs, 31,736 at 2048), so the smoke rate would have set 2.5e8, which the 2048-env job finishes in about 2.3 h, leaving about 9 of the 12 hours unused. A 5-minute probe at 2048 envs set it instead: 1.18e9.
 
 ## Open issues
 
-1. **Newton not run.** Smoke-run results, H100 throughput and the 12 h `total_timesteps` are pending. The Slurm job's partition and constraint names and the GPU driver version are unverified.
+1. **12 h job in progress** (Newton job 1164683, run `runs/phase1/20261105_71ba43c6fd`, 2,250 updates). It started at 16:48 on Nov 5; the first updates ran at 31,000–32,000 env-steps/s after a 314 s compile, so it should finish around 04:00 on Nov 6. Held-out completion of its `best.safetensors`, nominal and randomized, is still to report, then the export for stage 0 in the ROS sim. The cause of the post-training hang under `srun` (D19) is inferred from the two runs, not confirmed with a stack dump.
 2. **Low-speed model gap between the two sims (affects car stages 2 and 3).** The JAX `st` model switches to a CG kinematic model below 1.5 m/s, while the classic gym runs `st` down to 0.5 m/s and a rear-axle kinematic model below that. With steering in the 0.5–1.5 m/s band the sims drift apart:
 
    | Speed and steering, held 6 s | Gap after 2 s | Max gap over 6 s |
