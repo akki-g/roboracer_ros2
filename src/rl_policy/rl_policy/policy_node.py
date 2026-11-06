@@ -16,6 +16,8 @@ action. The frame stack and previous action reset whenever the node
 import json
 import math
 import os
+import time
+from collections import deque
 
 import numpy as np
 import rclpy
@@ -104,6 +106,7 @@ class PolicyNode(Node):
         self.prev_action = ob.reset_action()
         self.active = False
         self.brake_events = 0
+        self.forward_ms = deque(maxlen=500)  # policy forward-pass times, for the debug topic
 
         self.drive_pub = self.create_publisher(
             AckermannDriveStamped, self.get_parameter("drive_topic").value, 10)
@@ -159,8 +162,10 @@ class PolicyNode(Node):
         """Take the observation layout from the policy (phase-1 files: 109 beams,
         stack 3; phase 1c: 271 beams) and check it is one obs.py can build."""
         arch = cfg.get("arch", "mlp")
-        if arch != "mlp":
-            raise ValueError(f"policy arch {arch!r} is not supported by this node yet")
+        if arch not in ("mlp", "cnn_gru"):
+            raise ValueError(f"policy arch {arch!r} is not supported by this node")
+        if arch == "cnn_gru" and int(cfg["frame_stack"]) != 1:
+            raise ValueError("a cnn_gru policy takes one scan per step (frame_stack 1)")
         idx = np.asarray(cfg["beam_indices"], dtype=int)
         if idx.tolist() != ob.beam_indices(len(idx)).tolist():
             raise ValueError("policy beam indices are not evenly spaced over the car's 1081 beams")
@@ -226,15 +231,18 @@ class PolicyNode(Node):
         if usable and fresh:
             _, ranges, _, _ = self.scan
             scan_norm = ob.normalize_scan(ranges[self.scan_idx])
-            if not self.active:  # (re)activation: fresh stack, stopped previous action
+            if not self.active:  # (re)activation: fresh stack, stopped previous action, zero GRU state
                 self.stack = ob.init_stack(scan_norm, self.frame_stack)
                 self.prev_action = ob.reset_action()
+                self.policy.reset()  # recurrent policies: start-up, watchdog recovery, enabled toggled on
                 self.active = True
-                self.get_logger().info("policy active: frame stack and previous action reset")
+                self.get_logger().info("policy active: frame stack, previous action and recurrent state reset")
             else:
                 self.stack = ob.push_scan(self.stack, scan_norm)
             observation = ob.build_obs(self.stack, speed_meas, self.prev_action)
-            raw_action = self.policy(observation)
+            t0 = time.perf_counter()
+            raw_action = self.policy(observation)  # steps a GRU even on ticks the safety layer overrides
+            self.forward_ms.append((time.perf_counter() - t0) * 1e3)
             speed_cmd, steer_cmd = ob.action_to_command(raw_action, self.v_cmd_max, self.steer_max)
         elif self.active:
             self.active = False
@@ -270,6 +278,12 @@ class PolicyNode(Node):
             "published": [float(result.speed), float(result.steer)],
             "overrides": result.overrides,
             "min_ttc": None if math.isinf(ttc) else round(ttc, 3),
+            "policy_ms": None if not self.forward_ms else {
+                "last": round(self.forward_ms[-1], 3),
+                "p50": round(float(np.percentile(self.forward_ms, 50)), 3),
+                "p99": round(float(np.percentile(self.forward_ms, 99)), 3)},
+            "gru_h_norm": (round(float(np.linalg.norm(self.policy.h)), 3)
+                           if self.policy is not None and getattr(self.policy, "arch", "mlp") == "cnn_gru" else None),
             "obs_summary": None if self.stack is None else {
                 "scan_min_m": float(self.stack[0].min() * ob.MAX_RANGE),
                 "scan_front_m": float(self.stack[0][self.num_beams // 2] * ob.MAX_RANGE),
