@@ -1,9 +1,9 @@
 #!/bin/bash
 # Start the ROS sim (RViz comes up with the bridge) and drive it with an RL policy.
 #
-#   tools/sim_gru.sh                         # models/gru_u00100.npz on sim/sim_rl.yaml (Duct1077)
-#   tools/sim_gru.sh gru_u00150.npz          # another file in src/rl_policy/models (or a full path)
-#   tools/sim_gru.sh gru_u00100.npz 90       # also run the lap monitor for 90 s, print laps/crashes, then stop
+#   tools/sim_gru.sh                         # models/gru_u02050.npz on sim/sim_rl.yaml (Duct1077)
+#   tools/sim_gru.sh mlp3_u02050.npz         # another file in src/rl_policy/models (or a full path)
+#   tools/sim_gru.sh gru_u02050.npz 90       # also run the lap monitor for 90 s, print laps/crashes, then stop
 #   MAP=EvalDuct3012 tools/sim_gru.sh        # a never-trained map: sim/sim_rl_<MAP>.yaml (tools/sim_gru.sh --maps lists them)
 #   SIM_CONFIG=sim/sim.yaml tools/sim_gru.sh # any sim config (its map needs a *_centerline.csv for the monitor)
 #
@@ -18,7 +18,7 @@ if [ "${1:-}" = "--maps" ]; then
   echo "start one with  MAP=<name> tools/sim_gru.sh [policy.npz] [seconds]"
   exit 0
 fi
-POLICY="${1:-gru_u00100.npz}"
+POLICY="${1:-gru_u02050.npz}"
 MONITOR_S="${2:-}"
 if [ -n "${MAP:-}" ]; then
   SIM_CONFIG="sim/sim_rl_${MAP}.yaml"

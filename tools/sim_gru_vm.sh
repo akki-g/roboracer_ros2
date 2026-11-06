@@ -3,8 +3,8 @@
 # container with your desktop's display (docker-compose.linux.yml) and run
 # tools/sim_gru.sh inside it. RViz opens as a normal window. Same arguments:
 #
-#   tools/sim_gru_vm.sh                              # gru_u00100.npz on Duct1077, until Ctrl-C
-#   tools/sim_gru_vm.sh gru_u00150.npz 90            # another policy; lap monitor for 90 s, then stop
+#   tools/sim_gru_vm.sh                              # gru_u02050.npz on Duct1077, until Ctrl-C
+#   tools/sim_gru_vm.sh mlp3_u02050.npz 90           # another policy; lap monitor for 90 s, then stop
 #   MAP=EvalDuct3012 tools/sim_gru_vm.sh             # a never-trained map (tools/sim_gru.sh --maps lists them)
 #
 # First run builds the image (docker compose up), which takes a while.

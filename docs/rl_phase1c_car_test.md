@@ -6,39 +6,46 @@ the GRU state between ticks.
 
 ## What is ready
 
-| File | Source | Held-out eval, nominal | ROS sim, Duct1077, 90 s, no cap, no TTC brake |
+Both 12 h runs finished (2077 updates). The final checkpoints are the ones to test:
+
+| File | Source | Held-out eval, nominal | Laps (Spielberg / Duct1077 / Duct1112) |
 |---|---|---|---|
-| `models/gru_u00150.npz` | GRU run `20261106_f9b314198a`, update 150 | 0.93 (narrow ducts 0.7-0.9) | 8.4 laps, 0 crashes, 6.5 m/s mean (a rerun: 6.8 laps/90 s, two slow creeps near a wall) |
-| `models/gru_u00100.npz` | same run, update 100 | **1.00** | 7.8 laps, 0 crashes, 6.0 m/s mean |
-| newer | `tools/fetch_gru_policy.sh` (below) | picks the fastest eval with completion 1.00 | run the sim check below |
+| `models/gru_u02050.npz` | **CNN+GRU, final** (run `20261106_f9b314198a`, update 2050) | **1.00** on all 6 held-out maps | 42.7 / 9.1 / 7.9 s |
+| `models/mlp3_u02050.npz` | MLP-3 baseline, final (run `20261106_4ca8863226`, update 2050; 271 beams, 3-frame stack) | **1.00** | 48.6 / 10.9 / 9.9 s |
+| `models/gru_u00100.npz`, `gru_u00150.npz` | early GRU checkpoints | 1.00, 0.93 | ROS sim results below |
 
-The 12 h training run keeps going (about update 1400 by 8 am); a newer checkpoint is usually better.
+The GRU is about 15% faster per lap. Run the GRU first and keep the MLP-3 as the fallback: it has
+no hidden state, so it is easier to reason about if the car does something odd.
 
-## 1. Newest policy (Mac, optional)
+## 1. Sim check (Ubuntu VM, in the dev container)
 
-```bash
-ssh -fN newton                                   # password + Duo
-cd ~/Desktop/CARVEL/roboracer_ros2
-tools/fetch_gru_policy.sh                        # or: tools/fetch_gru_policy.sh 20261106_f9b314198a <update>
-git add src/rl_policy/models/gru_u*.npz && git commit -m "rl_policy: GRU policy update <N>" && git push
-```
-
-## 2. Sim check (Ubuntu VM)
-
-One script starts the sim (RViz comes up with the bridge), drives it with a policy, and optionally
-runs the lap monitor; Ctrl-C stops everything:
+`tools/sim_gru_vm.sh` runs on the VM itself (not inside a container). It starts the dev container
+with the VM's display (`docker-compose.linux.yml`), rebuilds `rl_policy` so new models are
+installed, and runs `tools/sim_gru.sh` inside. RViz opens as a normal window. Ctrl-C stops
+everything.
 
 ```bash
 cd ~/roboracer_ros2 && git pull
-source /opt/ros/humble/setup.bash && source ~/sim_ws/install/setup.bash
-colcon build --packages-select rl_policy && source install/setup.bash
-tools/sim_gru.sh                                   # gru_u00100.npz on Duct1077, until Ctrl-C
-tools/sim_gru.sh gru_u00150.npz 90                 # another policy; lap monitor for 90 s, then stop
-MAP=EvalDuct3012 tools/sim_gru.sh gru_u00100.npz   # a map never used in training or selection
-tools/sim_gru.sh --maps                            # list the maps
+tools/sim_gru_vm.sh                                   # gru_u02050.npz on Duct1077, until Ctrl-C
+tools/sim_gru_vm.sh gru_u02050.npz 90                 # lap monitor for 90 s, prints laps/crashes, then stops
+tools/sim_gru_vm.sh mlp3_u02050.npz 90                # the MLP-3 fallback
+MAP=EvalDuct3012 tools/sim_gru_vm.sh gru_u02050.npz 90   # a map never used in training or selection
+tools/sim_gru_vm.sh --maps                            # list the maps
 ```
 
-Pass: 3+ laps in 90 s on a narrow track, 0 crashes, `/drive` at 25 Hz.
+The same thing by hand:
+
+```bash
+export COMPOSE_FILE=docker-compose.yml:docker-compose.linux.yml
+xhost +local:
+docker compose up -d dev && docker compose exec dev bash
+# inside the container:
+colcon build --packages-select rl_policy && source install_docker/setup.bash
+tools/sim_gru.sh gru_u02050.npz 90
+```
+
+Pass: 3+ laps in 90 s on a narrow track, 0 crashes, `/drive` at 25 Hz
+(`ros2 topic hz /drive` in a second `docker compose exec dev bash`).
 
 Never-used maps (`sim/sim_rl_<name>.yaml`, from `tools/make_sim_maps.py`):
 
@@ -46,7 +53,8 @@ Never-used maps (`sim/sim_rl_<name>.yaml`, from `tools/make_sim_maps.py`):
 |---|---|
 | EvalDuct3012 (66 m, 1.7 m wide), EvalDuct3014 (61 m, 1.7 m), EvalDuct3020 (71 m, 2.3 m), EvalDuct3023 (79 m, 1.8 m), EvalDuct3034 (74 m, 2.4 m), EvalDuct3053 (71 m, 2.0 m) | IMS 293 m, Melbourne 474 m, MexicoCity 357 m, Nuerburgring 446 m, Sakhir 442 m, SaoPaulo 345 m, Sepang 487 m, Shanghai 498 m, Sochi 464 m, Spa 554 m, YasMarina 398 m, Zandvoort 388 m |
 
-Measured in the dev container, no cap, no TTC brake:
+Measured with the early checkpoints in the dev container, no cap, no TTC brake (the u02050 files
+have not been run in the ROS sim yet; that is the check above):
 
 | Map | Policy | Result |
 |---|---|---|
@@ -56,21 +64,27 @@ Measured in the dev container, no cap, no TTC brake:
 | EvalDuct3034 (never used) | gru_u00150 | 5.6 laps / 60 s, 0 crashes, 6.7 m/s |
 | Sepang (never used, 487 m) | gru_u00100 | 1.4 laps / 90 s, 0 crashes, 7.4 m/s |
 
-## 3. Car (Jetson)
+## 2. Car (Jetson)
 
 ```bash
-git pull && docker compose up -d car && docker compose exec car bash
+cd ~/roboracer_ros2 && git pull && docker compose up -d car && docker compose exec car bash
+# inside the container:
 colcon build --packages-select rl_policy && source install_docker/setup.bash
-ros2 run rl_policy bench_policy $(ros2 pkg prefix rl_policy)/share/rl_policy/models/gru_u00100.npz
+M=$(ros2 pkg prefix rl_policy)/share/rl_policy/models
+ros2 run rl_policy bench_policy $M/gru_u02050.npz
+ros2 run rl_policy bench_policy $M/mlp3_u02050.npz
 ```
 
-Pass: `PASS` (p99 < 5 ms; the Mac does 0.15 ms p50). Then:
+Pass: `PASS` (p99 < 5 ms; the Mac does 0.27 ms p99 for the GRU, 0.03 ms for the MLP-3). Then, each
+terminal a `docker compose exec car bash` with `install_docker` sourced and `M` set as above:
 
 ```bash
-ros2 launch f1tenth_stack bringup_launch.py                                              # terminal 1
-ros2 launch rl_policy policy.launch.py mode:=car policy_path:=$P record:=true            # terminal 2
-ros2 topic echo /policy_node/debug                                                        # terminal 3 (optional)
+ros2 launch f1tenth_stack bringup_launch.py                                                       # terminal 1
+ros2 launch rl_policy policy.launch.py mode:=car policy_path:=$M/gru_u02050.npz record:=true      # terminal 2
+ros2 topic echo /policy_node/debug                                                                 # terminal 3 (optional)
 ```
+
+Fallback: the same terminal 2 line with `$M/mlp3_u02050.npz`.
 
 **Driving:** the policy's `/drive` reaches the motor only while the autonomy deadman (button 5,
 RB on the F710) is held. Release it and the joystick's zero command takes over within 0.2 s.
