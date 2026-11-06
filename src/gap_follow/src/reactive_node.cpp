@@ -37,17 +37,19 @@ private:
 
   // ---- Tunable parameters ----
   const int smoothing_window_ = 9;   // moving average window (samples, odd)
-  const float max_range_ = 3.0f;     // clip ranges above this (m)
+  const float max_range_ = 5.0f;     // clip ranges above this (m); larger keeps
+                                     // curve exits distinguishable
   const float bubble_radius_ = 0.5f; // safety bubble around closest point (m)
   const float fov_half_angle_ =
       75.0f * M_PI / 180.0f;         // only look +/- 75 deg ahead
-  const float gap_threshold_ = 1.5f; // min range to be "free" (m); must be
-                                     // larger than half the corridor width so
-                                     // walls are NOT counted as gap
+  const float gap_threshold_ = 1.5f; // min range to be "free" (m)
   const float best_pt_margin_ =
-      0.3f; // points within this of the max count as "best"
-  const float steer_alpha_ = 0.4f;  // 1.0 = no smoothing, lower = smoother
-  const float max_steer_ = 0.4189f; // ~24 deg steering limit (rad)
+      0.4f; // points within this of the max count as "best"
+  const float steer_gain_ = 0.6f; // scales target angle; lower = less twitchy
+  const float steer_alpha_ =
+      0.7f; // 1.0 = no smoothing (too low adds lag -> oscillation)
+  const float max_steer_ = 0.4189f;    // ~24 deg steering limit (rad)
+  const float max_steer_rate_ = 0.08f; // max steering change per scan (rad)
 
   // Preprocess the LiDAR scan array:
   // 1. Replace NaN/Inf, clip high values
@@ -107,10 +109,8 @@ private:
     indice[1] = best_end;
   }
 
-  // Return index of best point in the gap.
-  // Instead of the single furthest point (which jumps around between nearly
-  // equal readings and causes oscillation), take the centroid of all points
-  // that are within best_pt_margin_ of the furthest range in the gap.
+  // Return index of best point in the gap: centroid of all points within
+  // best_pt_margin_ of the furthest range in the gap.
   int find_best_point(const std::vector<float> &ranges, const int *indice) {
     const int start_i = indice[0];
     const int end_i = indice[1];
@@ -142,6 +142,17 @@ private:
     const float angle_inc = scan_msg->angle_increment;
 
     preprocess_lidar(ranges);
+
+    // Distance straight ahead (+/- 10 deg), measured before the bubble is
+    // applied. Used to slow the car down when a wall is coming up.
+    const int center = static_cast<int>((0.0f - angle_min) / angle_inc);
+    const int half_w = static_cast<int>((10.0f * M_PI / 180.0f) / angle_inc);
+    float front_dist = max_range_;
+    for (int i = std::max(center - half_w, 0);
+         i <= std::min(center + half_w, n - 1); i++) {
+      if (ranges[i] > 0.01f)
+        front_dist = std::min(front_dist, ranges[i]);
+    }
 
     // Restrict to the front field of view
     int lo = static_cast<int>((-fov_half_angle_ - angle_min) / angle_inc);
@@ -179,23 +190,26 @@ private:
     // Find the best point in the gap
     const int best_idx = find_best_point(ranges, gap);
 
-    // Convert index to steering angle, smooth it, and clamp
-    float target_steer = angle_min + best_idx * angle_inc;
+    // Steering: scale by gain, light smoothing, rate limit, clamp
+    float target_steer = steer_gain_ * (angle_min + best_idx * angle_inc);
     float steering_angle =
         steer_alpha_ * target_steer + (1.0f - steer_alpha_) * prev_steer_;
+    steering_angle = std::clamp(steering_angle, prev_steer_ - max_steer_rate_,
+                                prev_steer_ + max_steer_rate_);
     steering_angle = std::clamp(steering_angle, -max_steer_, max_steer_);
     prev_steer_ = steering_angle;
 
-    // Slow down in sharper turns
+    // Speed: limited by both steering angle and distance to the wall ahead
     const float abs_steer = std::fabs(steering_angle);
     float speed;
-    if (abs_steer < 10.0f * M_PI / 180.0f) {
-      speed = 2.5f;
-    } else if (abs_steer < 20.0f * M_PI / 180.0f) {
+    if (abs_steer < 8.0f * M_PI / 180.0f) {
+      speed = 3f;
+    } else if (abs_steer < 16.0f * M_PI / 180.0f) {
       speed = 2.0f;
     } else {
-      speed = 1.6f;
+      speed = 2.0f;
     }
+    speed = std::min(speed, std::max(0.6f, 0.5f * front_dist));
 
     // Publish Drive message
     ackermann_msgs::msg::AckermannDriveStamped drive_msg;
