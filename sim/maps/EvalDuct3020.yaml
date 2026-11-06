@@ -1,0 +1,6 @@
+image: EvalDuct3020.png
+resolution: 0.05
+origin: [-14.845137600122397, -9.66495354098264, 0.0]
+negate: 0
+occupied_thresh: 0.45
+free_thresh: 0.196

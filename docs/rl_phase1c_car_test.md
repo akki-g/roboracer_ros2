@@ -25,16 +25,36 @@ git add src/rl_policy/models/gru_u*.npz && git commit -m "rl_policy: GRU policy 
 
 ## 2. Sim check (Ubuntu VM)
 
+One script starts the sim (RViz comes up with the bridge), drives it with a policy, and optionally
+runs the lap monitor; Ctrl-C stops everything:
+
 ```bash
-git pull && colcon build --packages-select rl_policy && source install/setup.bash
-./start_sim.sh sim/sim_rl.yaml                                                            # terminal 1
-P=$(ros2 pkg prefix rl_policy)/share/rl_policy/models/gru_u00100.npz
-ros2 launch rl_policy policy.launch.py mode:=sim policy_path:=$P                          # terminal 2
-ros2 run rl_policy stage0_monitor --ros-args -p centerline:=$PWD/sim/maps/Duct1077_centerline.csv -p duration:=90.0   # terminal 3
+cd ~/roboracer_ros2 && git pull
+source /opt/ros/humble/setup.bash && source ~/sim_ws/install/setup.bash
+colcon build --packages-select rl_policy && source install/setup.bash
+tools/sim_gru.sh                                   # gru_u00100.npz on Duct1077, until Ctrl-C
+tools/sim_gru.sh gru_u00150.npz 90                 # another policy; lap monitor for 90 s, then stop
+MAP=EvalDuct3012 tools/sim_gru.sh gru_u00100.npz   # a map never used in training or selection
+tools/sim_gru.sh --maps                            # list the maps
 ```
 
-Pass: 3+ laps, 0 crashes, `/drive` at 25 Hz. The node log shows `loaded ... gru_u...npz`, the
-scan resampled to 271 angles (worst error 0.6 deg, ok), and `policy active: ... recurrent state reset`.
+Pass: 3+ laps in 90 s on a narrow track, 0 crashes, `/drive` at 25 Hz.
+
+Never-used maps (`sim/sim_rl_<name>.yaml`, from `tools/make_sim_maps.py`):
+
+| Narrow ducts, like the car track | Racetracks (2.2 m wide) |
+|---|---|
+| EvalDuct3012 (66 m, 1.7 m wide), EvalDuct3014 (61 m, 1.7 m), EvalDuct3020 (71 m, 2.3 m), EvalDuct3023 (79 m, 1.8 m), EvalDuct3034 (74 m, 2.4 m), EvalDuct3053 (71 m, 2.0 m) | IMS 293 m, Melbourne 474 m, MexicoCity 357 m, Nuerburgring 446 m, Sakhir 442 m, SaoPaulo 345 m, Sepang 487 m, Shanghai 498 m, Sochi 464 m, Spa 554 m, YasMarina 398 m, Zandvoort 388 m |
+
+Measured in the dev container, no cap, no TTC brake:
+
+| Map | Policy | Result |
+|---|---|---|
+| Duct1077 (held-out) | gru_u00150 | 8.4 laps / 90 s, 0 crashes, 6.5 m/s |
+| Duct1077 | gru_u00100 | 7.8 laps / 90 s, 0 crashes, 6.0 m/s |
+| EvalDuct3012 (never used) | gru_u00100 | 6.0 laps / 60 s, 0 crashes, 6.4 m/s |
+| EvalDuct3034 (never used) | gru_u00150 | 5.6 laps / 60 s, 0 crashes, 6.7 m/s |
+| Sepang (never used, 487 m) | gru_u00100 | 1.4 laps / 90 s, 0 crashes, 7.4 m/s |
 
 ## 3. Car (Jetson)
 
