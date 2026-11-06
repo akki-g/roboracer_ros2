@@ -33,6 +33,11 @@ from . import obs as ob
 from .numpy_policy import NumpyPolicy
 from .safety import DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, min_ttc
 
+# Training ends an episode after 2 s below 0.2 m/s; the node mirrors that by
+# resetting the stack, previous action and recurrent state (a fresh episode),
+# e.g. while the joystick holds the car before the autonomy deadman is pressed.
+STALL_SPEED = 0.2  # m/s
+STALL_TICKS = 50  # 2 s at 25 Hz
 SCAN_ANGLE_TOL = 0.01  # rad, on angle_min
 SCAN_INCREMENT_TOL = 2e-5  # rad; f1tenth_gym_ros publishes fov/N instead of fov/(N-1)
 def policy_angles(num_beams=ob.NUM_BEAMS):
@@ -107,6 +112,8 @@ class PolicyNode(Node):
         self.active = False
         self.brake_events = 0
         self.forward_ms = deque(maxlen=500)  # policy forward-pass times, for the debug topic
+        self.stopped_ticks = 0
+        self.stall_resets = 0
 
         self.drive_pub = self.create_publisher(
             AckermannDriveStamped, self.get_parameter("drive_topic").value, 10)
@@ -231,12 +238,22 @@ class PolicyNode(Node):
         if usable and fresh:
             _, ranges, _, _ = self.scan
             scan_norm = ob.normalize_scan(ranges[self.scan_idx])
+            self.stopped_ticks = self.stopped_ticks + 1 if abs(speed_meas) < STALL_SPEED else 0
+            stall_reset = self.active and self.stopped_ticks >= STALL_TICKS
+            if stall_reset:  # as training's stall end: a new episode
+                self.active = False
+                self.stopped_ticks = 0
+                self.stall_resets += 1
+                if self.stall_resets <= 3 or self.stall_resets % 50 == 0:
+                    self.get_logger().info(f"stopped for {STALL_TICKS / 25:.0f} s: starting a fresh episode "
+                                           f"(reset {self.stall_resets})")
             if not self.active:  # (re)activation: fresh stack, stopped previous action, zero GRU state
                 self.stack = ob.init_stack(scan_norm, self.frame_stack)
                 self.prev_action = ob.reset_action()
                 self.policy.reset()  # recurrent policies: start-up, watchdog recovery, enabled toggled on
                 self.active = True
-                self.get_logger().info("policy active: frame stack, previous action and recurrent state reset")
+                if not stall_reset:
+                    self.get_logger().info("policy active: frame stack, previous action and recurrent state reset")
             else:
                 self.stack = ob.push_scan(self.stack, scan_norm)
             observation = ob.build_obs(self.stack, speed_meas, self.prev_action)
@@ -278,6 +295,7 @@ class PolicyNode(Node):
             "published": [float(result.speed), float(result.steer)],
             "overrides": result.overrides,
             "min_ttc": None if math.isinf(ttc) else round(ttc, 3),
+            "stall_resets": self.stall_resets,
             "policy_ms": None if not self.forward_ms else {
                 "last": round(self.forward_ms[-1], 3),
                 "p50": round(float(np.percentile(self.forward_ms, 50)), 3),
