@@ -1,0 +1,21 @@
+# ROS sim (f1tenth_gym_ros). Confirm names with `ros2 topic list` first:
+# the bridge namespaces odometry as /ego_racecar/odom.
+policy_node:
+  ros__parameters:
+    scan_topic: /scan
+    odom_topic: /ego_racecar/odom
+    drive_topic: /drive
+    max_speed: 1.5
+    steer_limit: 0.4189
+    ttc_threshold: 0.5
+    ttc_half_angle_deg: 30.0
+    scan_timeout: 0.1
+    odom_timeout: 0.2
+    # f1tenth_gym's LiDAR is fixed at 1080 beams over 4.7 rad (the bridge's
+    # scan_beams / scan_fov only change the published metadata), so take the
+    # nearest beam to each policy angle. Never set this on the car.
+    # The sim's +-134.65 deg edge is 0.36 deg short of the policy's +-135 deg,
+    # and the bridge publishes angle_increment = fov/N where it casts at
+    # fov/(N-1), so the metadata-based error reads 0.60 deg at the edge.
+    scan_resample: true
+    resample_tol_deg: 1.0
