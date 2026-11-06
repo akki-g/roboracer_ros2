@@ -114,28 +114,66 @@ have not been run in the ROS sim yet; that is the check above):
 
 ## 2. Car (Jetson)
 
+### Without Docker (recommended: the container's joystick button numbers can differ)
+
+Once, from the repo on the Jetson (ROS 2 Humble installed natively; uses sudo):
+
 ```bash
-cd ~/roboracer_ros2 && git pull && docker compose up -d car && docker compose exec car bash
-# inside the container:
-colcon build --packages-select rl_policy && source install_docker/setup.bash
-M=$(ros2 pkg prefix rl_policy)/share/rl_policy/models
-ros2 run rl_policy bench_policy $M/gru_u02050.npz
-ros2 run rl_policy bench_policy $M/mlp3_u02050.npz
+cd ~/roboracer_ros2 && git pull         # wherever the repo is cloned on the Jetson
+tools/car_native.sh setup               # apt + rosdep deps, dialout/input groups, build, checks
+docker compose stop car                 # if the container is up: only one stack may own the VESC
 ```
 
-Pass: `PASS` (p99 < 5 ms; the Mac does 0.27 ms p99 for the GRU, 0.03 ms for the MLP-3). Then, each
-terminal a `docker compose exec car bash` (`.bashrc` sources `install_docker`). The launch line spells
-out the full path: `M` from above exists only in the terminal that set it, and an empty `$M` gives
-`no usable policy at '/gru_u02050.npz'` (the node then holds speed 0).
+Log out and back in if setup added you to a group. After every later `git pull`: `tools/car_native.sh
+build`. `tools/car_native.sh check` re-checks the VESC, joystick, LiDAR and groups. Then, in every
+terminal (or put the line in `~/.bashrc`, and source no other workspace with these packages):
 
 ```bash
-ros2 launch f1tenth_stack bringup_launch.py                                                       # terminal 1
+source /opt/ros/humble/setup.bash && source ~/roboracer_ros2/install/setup.bash
+```
+
+**Check the buttons before every first drive of the day**, with bringup running:
+
+```bash
+ros2 launch f1tenth_stack bringup_launch.py                 # terminal 1
+ros2 topic echo /joy --field buttons                        # terminal 2: hold LB -> index 4 is 1; hold RB -> index 5 is 1
+```
+
+`joy_teleop.yaml` uses button 4 (LB) for manual driving and 5 (RB) as the autonomy deadman. If other
+indices light up, stop: fix the mapping (the F710's switch on the back must be at X) before
+driving. Then:
+
+```bash
+ros2 run rl_policy bench_policy $(ros2 pkg prefix rl_policy)/share/rl_policy/models/gru_u02050.npz
 ros2 launch rl_policy policy.launch.py mode:=car record:=true max_speed:=3.0 \
   policy_path:=$(ros2 pkg prefix rl_policy)/share/rl_policy/models/gru_u02050.npz                 # terminal 2
 ros2 topic echo /policy_node/debug                                                                 # terminal 3 (optional)
 ```
 
-Fallback: the same terminal 2 line with `mlp3_u02050.npz`. Drop `max_speed:=3.0` after the first slow laps.
+Bags land in the directory you launch from.
+
+### In the container
+
+```bash
+cd ~/roboracer_ros2 && git pull && docker compose up -d car && docker compose exec car bash
+# inside the container:
+colcon build --packages-select rl_policy && source install_docker/setup.bash
+ros2 run rl_policy bench_policy $(ros2 pkg prefix rl_policy)/share/rl_policy/models/gru_u02050.npz
+```
+
+Each terminal is a `docker compose exec car bash` (`.bashrc` sources `install_docker`), then the same
+bringup and launch lines as above, and the same button check.
+
+### Both
+
+Bench pass: `PASS` (p99 < 5 ms; the Mac does 0.16 ms for the GRU, 0.03 ms for the MLP-3). The
+policy pins NumPy to one BLAS thread (a thread pool gave latency spikes). If it fails, the median is
+rarely the problem: run `sudo nvpmodel -m 0 && sudo jetson_clocks` (full clocks until reboot), stop
+other CPU load, and run it again. While driving, `policy_ms` in `/policy_node/debug` is the live
+check. The launch line spells out the full policy path: an empty `$M` gives
+`no usable policy at '/gru_u02050.npz'` (the node then holds speed 0).
+
+Fallback: the same launch line with `mlp3_u02050.npz`. Drop `max_speed:=3.0` after the first slow laps.
 
 **Driving:** the policy's `/drive` reaches the motor only while the autonomy deadman (button 5,
 RB on the F710) is held. Release it and the joystick's zero command takes over within 0.2 s.
