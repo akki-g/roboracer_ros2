@@ -1,10 +1,10 @@
-
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -33,13 +33,21 @@ private:
   rclcpp::Publisher<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr
       drive_pub_;
 
+  float prev_steer_ = 0.0f; // for steering smoothing
+
   // ---- Tunable parameters ----
-  const int smoothing_window_ = 5;    // moving average window (samples, odd)
-  const float max_range_ = 3.0f;      // clip ranges above this (m)
-  const float bubble_radius_ = 0.35f; // safety bubble around closest point (m)
-  const float fov_half_angle_ = M_PI / 2.0; // only consider +/- 90 deg in front
-  const float gap_threshold_ = 0.5f; // min range to be considered "free" (m)
-  const float max_steer_ = 0.4189f;  // ~24 deg steering limit (rad)
+  const int smoothing_window_ = 9;   // moving average window (samples, odd)
+  const float max_range_ = 3.0f;     // clip ranges above this (m)
+  const float bubble_radius_ = 0.5f; // safety bubble around closest point (m)
+  const float fov_half_angle_ =
+      75.0f * M_PI / 180.0f;         // only look +/- 75 deg ahead
+  const float gap_threshold_ = 1.5f; // min range to be "free" (m); must be
+                                     // larger than half the corridor width so
+                                     // walls are NOT counted as gap
+  const float best_pt_margin_ =
+      0.3f; // points within this of the max count as "best"
+  const float steer_alpha_ = 0.4f;  // 1.0 = no smoothing, lower = smoother
+  const float max_steer_ = 0.4189f; // ~24 deg steering limit (rad)
 
   // Preprocess the LiDAR scan array:
   // 1. Replace NaN/Inf, clip high values
@@ -99,32 +107,32 @@ private:
     indice[1] = best_end;
   }
 
-  // Start_i & end_i are start and end indices of max-gap range.
-  // Return index of best point in ranges.
-  // Naive: choose the furthest point in the gap. Ties are broken toward the
-  // middle of the gap, which keeps the car from hugging a wall.
+  // Return index of best point in the gap.
+  // Instead of the single furthest point (which jumps around between nearly
+  // equal readings and causes oscillation), take the centroid of all points
+  // that are within best_pt_margin_ of the furthest range in the gap.
   int find_best_point(const std::vector<float> &ranges, const int *indice) {
     const int start_i = indice[0];
     const int end_i = indice[1];
-    const int mid = (start_i + end_i) / 2;
 
-    int best = mid;
-    float best_val = ranges[mid];
+    float max_val = 0.0f;
     for (int i = start_i; i <= end_i; i++) {
-      if (ranges[i] > best_val + 1e-3f ||
-          (std::fabs(ranges[i] - best_val) <= 1e-3f &&
-           std::abs(i - mid) < std::abs(best - mid))) {
-        best_val = ranges[i];
-        best = i;
+      max_val = std::max(max_val, ranges[i]);
+    }
+
+    double sum_idx = 0.0;
+    int count = 0;
+    for (int i = start_i; i <= end_i; i++) {
+      if (ranges[i] >= max_val - best_pt_margin_) {
+        sum_idx += i;
+        count++;
       }
     }
-    return best;
+    return static_cast<int>(std::round(sum_idx / count));
   }
 
   void
   lidar_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr scan_msg) {
-    // Process each LiDAR scan as per the Follow Gap algorithm
-    // & publish an AckermannDriveStamped message
     std::vector<float> ranges(scan_msg->ranges.begin(), scan_msg->ranges.end());
     const int n = ranges.size();
     if (n == 0)
@@ -171,19 +179,22 @@ private:
     // Find the best point in the gap
     const int best_idx = find_best_point(ranges, gap);
 
-    // Convert index to steering angle and clamp
-    float steering_angle = angle_min + best_idx * angle_inc;
+    // Convert index to steering angle, smooth it, and clamp
+    float target_steer = angle_min + best_idx * angle_inc;
+    float steering_angle =
+        steer_alpha_ * target_steer + (1.0f - steer_alpha_) * prev_steer_;
     steering_angle = std::clamp(steering_angle, -max_steer_, max_steer_);
+    prev_steer_ = steering_angle;
 
     // Slow down in sharper turns
     const float abs_steer = std::fabs(steering_angle);
     float speed;
     if (abs_steer < 10.0f * M_PI / 180.0f) {
-      speed = 3.5f;
+      speed = 2.5f;
     } else if (abs_steer < 20.0f * M_PI / 180.0f) {
-      speed = 3.0f;
+      speed = 2.0f;
     } else {
-      speed = 1.5f;
+      speed = 1.6f;
     }
 
     // Publish Drive message
