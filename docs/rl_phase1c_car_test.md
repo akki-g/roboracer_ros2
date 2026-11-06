@@ -124,15 +124,18 @@ ros2 run rl_policy bench_policy $M/mlp3_u02050.npz
 ```
 
 Pass: `PASS` (p99 < 5 ms; the Mac does 0.27 ms p99 for the GRU, 0.03 ms for the MLP-3). Then, each
-terminal a `docker compose exec car bash` with `install_docker` sourced and `M` set as above:
+terminal a `docker compose exec car bash` (`.bashrc` sources `install_docker`). The launch line spells
+out the full path: `M` from above exists only in the terminal that set it, and an empty `$M` gives
+`no usable policy at '/gru_u02050.npz'` (the node then holds speed 0).
 
 ```bash
 ros2 launch f1tenth_stack bringup_launch.py                                                       # terminal 1
-ros2 launch rl_policy policy.launch.py mode:=car policy_path:=$M/gru_u02050.npz record:=true      # terminal 2
+ros2 launch rl_policy policy.launch.py mode:=car record:=true max_speed:=3.0 \
+  policy_path:=$(ros2 pkg prefix rl_policy)/share/rl_policy/models/gru_u02050.npz                 # terminal 2
 ros2 topic echo /policy_node/debug                                                                 # terminal 3 (optional)
 ```
 
-Fallback: the same terminal 2 line with `$M/mlp3_u02050.npz`.
+Fallback: the same terminal 2 line with `mlp3_u02050.npz`. Drop `max_speed:=3.0` after the first slow laps.
 
 **Driving:** the policy's `/drive` reaches the motor only while the autonomy deadman (button 5,
 RB on the F710) is held. Release it and the joystick's zero command takes over within 0.2 s.
