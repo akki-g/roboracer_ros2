@@ -1,0 +1,14 @@
+# Linux desktop (VM or laptop): RViz opens as a normal window.
+# Use together with docker-compose.yml:
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.linux.yml
+services:
+  dev:
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix   # your desktop's X server
+    devices:
+      - /dev/dri:/dev/dri               # VMware's 3D graphics, so RViz uses the GPU
+    ipc: host                           # lets RViz share memory with the X server
+    ports:
+      - "8765:8765"                     # Foxglove on the Mac: ws://<vm-ip>:8765

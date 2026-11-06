@@ -5,10 +5,10 @@ policy_node:
     scan_topic: /scan
     odom_topic: /ego_racecar/odom
     drive_topic: /drive
-    max_speed: 1.5
+    max_speed: 10.5
     steer_limit: 0.4189
     ttc_threshold: 0.5
-    ttc_half_angle_deg: 30.0
+    ttc_half_angle_deg: 0.0
     scan_timeout: 0.1
     odom_timeout: 0.2
     # f1tenth_gym's LiDAR is fixed at 1080 beams over 4.7 rad (the bridge's

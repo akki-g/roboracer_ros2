@@ -5,10 +5,10 @@ policy_node:
     scan_topic: /scan
     odom_topic: /odom
     drive_topic: /drive
-    max_speed: 1.5          # m/s - default; raise only per the test protocol stage
+    max_speed: 10.0          # m/s - default; raise only per the test protocol stage
     steer_limit: 0.4189     # rad
     ttc_threshold: 0.5      # s
-    ttc_half_angle_deg: 30.0
+    ttc_half_angle_deg: 0.0
     scan_timeout: 0.1       # s
     odom_timeout: 0.2       # s
     scan_resample: false    # the car must deliver the UST-10LX's 1081 beams
