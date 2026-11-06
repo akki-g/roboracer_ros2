@@ -55,6 +55,7 @@ class PolicyNode(Node):
         self.declare_parameter("steer_limit", STEER_LIMIT)
         self.declare_parameter("ttc_threshold", 0.5)
         self.declare_parameter("ttc_half_angle_deg", 30.0)
+        self.declare_parameter("ttc_brake", True)
         self.declare_parameter("scan_timeout", 0.1)
         self.declare_parameter("odom_timeout", 0.2)
         self.declare_parameter("enabled", True)
@@ -118,12 +119,14 @@ class PolicyNode(Node):
             steer_limit=float(get("steer_limit")),
             ttc_threshold=float(get("ttc_threshold")),
             ttc_half_angle=math.radians(float(get("ttc_half_angle_deg"))),
+            ttc_brake=bool(get("ttc_brake")),
             scan_timeout=float(get("scan_timeout")),
             odom_timeout=float(get("odom_timeout")),
         )
 
     def _on_set_parameters(self, params):
-        names = ("max_speed", "steer_limit", "ttc_threshold", "ttc_half_angle_deg", "scan_timeout", "odom_timeout")
+        names = ("max_speed", "steer_limit", "ttc_threshold", "ttc_half_angle_deg", "ttc_brake",
+                 "scan_timeout", "odom_timeout")
         current = {n: self.get_parameter(n).value for n in names}
         enabled = self.enabled
         for p in params:

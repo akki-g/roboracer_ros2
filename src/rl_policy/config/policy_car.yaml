@@ -9,6 +9,7 @@ policy_node:
     steer_limit: 0.4189     # rad
     ttc_threshold: 0.5      # s
     ttc_half_angle_deg: 0.0
+    ttc_brake: true         # with a 0 deg cone only the centre beam (index 540) can brake
     scan_timeout: 0.1       # s
     odom_timeout: 0.2       # s
     scan_resample: false    # the car must deliver the UST-10LX's 1081 beams

@@ -65,6 +65,18 @@ def test_emergency_brake_ttc():
     assert min_ttc(ranges, ANGLES, 1.0) == pytest.approx(0.5 / math.cos(ANGLES[i]))
 
 
+def test_ttc_brake_switch():
+    """ttc_brake=False never brakes on TTC; the other checks still apply."""
+    off = SafetyConfig(ttc_brake=False)
+    off.validate()
+    r = apply_safety(1.0, 0.0, off, scan_age=0.0, odom_age=0.0, ttc=0.05)
+    assert r.speed == 1.0 and "emergency_brake" not in r.overrides
+    r = apply_safety(1.0, 0.0, off, scan_age=1.0, odom_age=0.0, ttc=0.05)
+    assert r.speed == 0.0 and "watchdog_scan" in r.overrides
+    on = apply_safety(1.0, 0.0, SafetyConfig(), scan_age=0.0, odom_age=0.0, ttc=0.05)
+    assert on.speed == 0.0 and "emergency_brake" in on.overrides
+
+
 def test_ttc_ignores_invalid_returns_and_handles_standstill():
     ranges = np.full(1081, np.inf)
     ranges[530:550] = np.nan

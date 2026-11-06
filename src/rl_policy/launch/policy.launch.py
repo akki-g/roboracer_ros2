@@ -28,6 +28,9 @@ def _nodes(context):
     max_speed = LaunchConfiguration('max_speed').perform(context)
     if max_speed:
         overrides['max_speed'] = float(max_speed)
+    ttc_brake = LaunchConfiguration('ttc_brake').perform(context)
+    if ttc_brake:
+        overrides['ttc_brake'] = ttc_brake.lower() in ('1', 'true', 'yes')
     odom = '/ego_racecar/odom' if mode == 'sim' else '/odom'
     return [
         Node(package='rl_policy', executable='policy_node', name='policy_node', output='screen',
@@ -43,7 +46,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('mode', default_value='car', description='car or sim'),
         DeclareLaunchArgument('policy_path', default_value=default_policy),
-        DeclareLaunchArgument('max_speed', default_value='', description='m/s; empty keeps the yaml value (1.5)'),
+        DeclareLaunchArgument('max_speed', default_value='', description='m/s; empty keeps the yaml value'),
+        DeclareLaunchArgument('ttc_brake', default_value='', description='true/false; empty keeps the yaml value'),
         DeclareLaunchArgument('record', default_value='false'),
         OpaqueFunction(function=_nodes),
     ])

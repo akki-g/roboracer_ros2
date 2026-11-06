@@ -5,7 +5,10 @@ can be unit-tested. Applied after the policy, in this order:
 2. Steering clamp    +-steer_limit (0.4189 rad)
 3. Emergency brake   time-to-collision over the beams within +-30 deg of
                      straight ahead, TTC = range / max(v cos(theta), 0.01);
-                     below ttc_threshold (0.5 s) command speed 0
+                     below ttc_threshold (0.5 s) command speed 0.
+                     ttc_brake=False switches it off: it fires on normal
+                     cornering lines in narrow tracks, and training has no
+                     brake (results note, D23). Use it on early car runs.
 4. Watchdog          scan older than 100 ms or odometry older than 200 ms
                      (or no valid scan / odometry / policy) -> speed 0
 5. Deadman           not in this node: the joystick (mux priority 100)
@@ -32,6 +35,7 @@ class SafetyConfig:
     steer_limit: float = STEER_LIMIT
     ttc_threshold: float = TTC_THRESHOLD
     ttc_half_angle: float = TTC_HALF_ANGLE
+    ttc_brake: bool = True
     scan_timeout: float = SCAN_TIMEOUT
     odom_timeout: float = ODOM_TIMEOUT
 
@@ -90,7 +94,7 @@ def apply_safety(speed_cmd, steer_cmd, cfg, *, scan_age, odom_age, ttc, valid=Tr
         overrides.append("steer_clamp")
     steer = clamped
     # 3. emergency brake
-    if ttc < cfg.ttc_threshold:
+    if cfg.ttc_brake and ttc < cfg.ttc_threshold:
         speed = 0.0
         overrides.append("emergency_brake")
     # 4. watchdog
