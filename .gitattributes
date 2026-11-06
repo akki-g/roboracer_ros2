@@ -1,0 +1,3 @@
+# Text files are checked out with LF line endings on every OS: the scripts run in Linux
+# containers, and bash can't run a script with Windows (CRLF) line endings.
+* text=auto eol=lf
