@@ -6,6 +6,7 @@ on the Jetson CPU, against a 40 ms tick). No ROS needed:
 """
 
 import argparse
+import os
 import sys
 import time
 
@@ -15,6 +16,7 @@ from . import obs as ob
 from .numpy_policy import NumpyPolicy
 
 BUDGET_P99_MS = 5.0
+TICK_MS = 40.0
 
 
 def main(argv=None):
@@ -40,9 +42,14 @@ def main(argv=None):
             pol.reset()  # as on re-activation
     p50, p99, mx = np.percentile(times, 50), np.percentile(times, 99), times.max()
     print(f"{cfg.get('arch', 'mlp')} policy, {a.calls} calls: p50 {p50:.3f} ms  p99 {p99:.3f} ms  max {mx:.3f} ms "
-          f"(budget p99 < {BUDGET_P99_MS} ms; tick 40 ms)")
+          f"(budget p99 < {BUDGET_P99_MS} ms; tick {TICK_MS:.0f} ms)")
+    print(f"calls longer than a tick: {int((times > TICK_MS).sum())}   "
+          f"BLAS threads: OPENBLAS_NUM_THREADS={os.environ.get('OPENBLAS_NUM_THREADS')}")
     ok = p99 < BUDGET_P99_MS
     print("PASS" if ok else "FAIL")
+    if not ok:
+        print("Spikes, not the median, usually fail this. On the Jetson: sudo nvpmodel -m 0 && sudo jetson_clocks "
+              "(full clocks), stop anything else using the CPU, and run it again.")
     return 0 if ok else 1
 
 
