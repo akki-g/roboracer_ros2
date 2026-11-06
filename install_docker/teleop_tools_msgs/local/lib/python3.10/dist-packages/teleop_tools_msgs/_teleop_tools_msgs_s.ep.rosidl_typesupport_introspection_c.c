@@ -1,1 +1,0 @@
-/root/ros2_ws/build_docker/teleop_tools_msgs/rosidl_generator_py/teleop_tools_msgs/_teleop_tools_msgs_s.ep.rosidl_typesupport_introspection_c.c

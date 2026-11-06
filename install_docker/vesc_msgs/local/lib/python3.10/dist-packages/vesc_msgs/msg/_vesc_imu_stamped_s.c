@@ -1,1 +1,0 @@
-/root/ros2_ws/build_docker/vesc_msgs/rosidl_generator_py/vesc_msgs/msg/_vesc_imu_stamped_s.c

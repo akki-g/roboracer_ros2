@@ -1,1 +1,0 @@
-/root/ros2_ws/build_docker/vesc_msgs/ament_cmake_python/vesc_msgs/vesc_msgs.egg-info/dependency_links.txt

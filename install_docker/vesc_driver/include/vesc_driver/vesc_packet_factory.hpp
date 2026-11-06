@@ -1,1 +1,0 @@
-/root/ros2_ws/src/f1tenth_system/vesc/vesc_driver/include/vesc_driver/vesc_packet_factory.hpp

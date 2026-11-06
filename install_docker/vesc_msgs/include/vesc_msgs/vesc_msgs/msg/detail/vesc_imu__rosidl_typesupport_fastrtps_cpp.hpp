@@ -1,1 +1,0 @@
-/root/ros2_ws/build_docker/vesc_msgs/rosidl_typesupport_fastrtps_cpp/vesc_msgs/msg/detail/vesc_imu__rosidl_typesupport_fastrtps_cpp.hpp

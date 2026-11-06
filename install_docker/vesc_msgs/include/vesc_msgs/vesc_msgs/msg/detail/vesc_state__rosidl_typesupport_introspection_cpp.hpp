@@ -1,1 +1,0 @@
-/root/ros2_ws/build_docker/vesc_msgs/rosidl_typesupport_introspection_cpp/vesc_msgs/msg/detail/vesc_state__rosidl_typesupport_introspection_cpp.hpp

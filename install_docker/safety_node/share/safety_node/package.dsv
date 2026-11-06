@@ -1,9 +1,0 @@
-source;share/safety_node/hook/pythonpath.ps1
-source;share/safety_node/hook/pythonpath.dsv
-source;share/safety_node/hook/pythonpath.sh
-source;share/safety_node/hook/ament_prefix_path.ps1
-source;share/safety_node/hook/ament_prefix_path.dsv
-source;share/safety_node/hook/ament_prefix_path.sh
-source;../../build_docker/safety_node/share/safety_node/hook/pythonpath_develop.ps1
-source;../../build_docker/safety_node/share/safety_node/hook/pythonpath_develop.dsv
-source;../../build_docker/safety_node/share/safety_node/hook/pythonpath_develop.sh

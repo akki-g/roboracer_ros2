@@ -1,1 +1,0 @@
-/root/ros2_ws/build_docker/teleop_tools/ament_cmake_environment_hooks/local_setup.zsh

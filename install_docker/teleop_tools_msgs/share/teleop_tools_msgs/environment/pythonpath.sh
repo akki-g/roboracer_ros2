@@ -1,1 +1,0 @@
-/root/ros2_ws/build_docker/teleop_tools_msgs/ament_cmake_environment_hooks/pythonpath.sh
