@@ -1,5 +1,5 @@
-# Linux desktop (VM or laptop): RViz opens as a normal window.
-# Use together with docker-compose.yml:
+# Linux desktop (VM, laptop or desktop): RViz opens as a normal window.
+# tools/sim_gru_linux.sh uses it. By hand, together with docker-compose.yml:
 #   export COMPOSE_FILE=docker-compose.yml:docker-compose.linux.yml
 services:
   dev:
@@ -8,7 +8,7 @@ services:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix   # your desktop's X server
     devices:
-      - /dev/dri:/dev/dri               # VMware's 3D graphics, so RViz uses the GPU
+      - /dev/dri:/dev/dri               # the GPU (VMware's 3D graphics in the VM) for RViz
     ipc: host                           # lets RViz share memory with the X server
     ports:
       - "8765:8765"                     # Foxglove on the Mac: ws://<vm-ip>:8765

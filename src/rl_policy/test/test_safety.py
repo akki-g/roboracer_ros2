@@ -117,3 +117,24 @@ def test_executed_action_round_trip():
     a = ob.command_to_action(1.5, 0.2)
     assert a[0] == pytest.approx(2 * 1.5 / 8.0 - 1) and a[1] == pytest.approx(0.2 / 0.4189)
     np.testing.assert_allclose(ob.command_to_action(0.0, 0.0), ob.RESET_ACTION)
+
+
+def test_speed_scale():
+    from rl_policy.safety import speed_scale
+
+    cfg = SafetyConfig(max_speed=3.0, scale_speed=True)
+    s = speed_scale(cfg, 8.0)
+    assert s == pytest.approx(3.0 / 8.0)
+    # the policy's whole range lands inside the cap, in proportion: the clamp never fires
+    for v in (0.0, 2.0, 5.0, 8.0):
+        r = apply_safety(v * s, 0.0, cfg, **FRESH)
+        assert "speed_cap" not in r.overrides and r.speed == pytest.approx(v * 3.0 / 8.0)
+    # previous action, as the node computes it: the policy's own request
+    r = apply_safety(6.0 * s, 0.1, cfg, **FRESH)
+    np.testing.assert_allclose(ob.command_to_action(r.speed / s, r.steer, 8.0), ob.command_to_action(6.0, 0.1, 8.0))
+    # a safety stop still shows as a stop
+    r = apply_safety(6.0 * s, 0.1, cfg, scan_age=0.5, odom_age=0.02, ttc=math.inf)
+    assert r.speed == 0.0 and ob.command_to_action(r.speed / s, r.steer, 8.0)[0] == -1.0
+    assert speed_scale(SafetyConfig(max_speed=3.0), 8.0) == 1.0  # off: clamp
+    assert speed_scale(SafetyConfig(max_speed=10.0, scale_speed=True), 8.0) == 1.0  # cap above the range
+    assert speed_scale(SafetyConfig(max_speed=0.0, scale_speed=True), 8.0) == 1.0  # zero cap: clamp to 0

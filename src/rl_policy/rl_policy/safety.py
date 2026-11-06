@@ -1,7 +1,11 @@
 """Safety layer for the RL policy node (spec section 7.3), free of ROS so it
 can be unit-tested. Applied after the policy, in this order:
 
-1. Speed cap         clamp the speed command to max_speed (default 1.5 m/s)
+1. Speed cap         clamp the speed command to max_speed (default 1.5 m/s).
+                     With scale_speed, the node first scales the policy's speed
+                     range [0, v_cmd_max] onto [0, max_speed] (speed_scale()), so
+                     the policy's slow-downs survive a low cap; the clamp stays
+                     as a backstop.
 2. Steering clamp    +-steer_limit (0.4189 rad)
 3. Emergency brake   time-to-collision over the beams within +-30 deg of
                      straight ahead, TTC = range / max(v cos(theta), 0.01);
@@ -36,6 +40,7 @@ class SafetyConfig:
     ttc_threshold: float = TTC_THRESHOLD
     ttc_half_angle: float = TTC_HALF_ANGLE
     ttc_brake: bool = True
+    scale_speed: bool = False
     scan_timeout: float = SCAN_TIMEOUT
     odom_timeout: float = ODOM_TIMEOUT
 
@@ -54,6 +59,15 @@ class SafetyResult:
     steer: float
     overrides: list = field(default_factory=list)  # names of the rules that fired
     min_ttc: float = math.inf
+
+
+def speed_scale(cfg, v_cmd_max):
+    """Factor that maps the policy's speed range [0, v_cmd_max] onto [0, max_speed]:
+    max_speed / v_cmd_max with scale_speed on and a cap below the policy's range,
+    else 1.0 (the cap clamps)."""
+    if cfg.scale_speed and 0.0 < cfg.max_speed < v_cmd_max:
+        return cfg.max_speed / v_cmd_max
+    return 1.0
 
 
 def min_ttc(ranges, angles, speed, half_angle=TTC_HALF_ANGLE, range_min=0.0):

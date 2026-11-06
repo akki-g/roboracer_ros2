@@ -54,7 +54,7 @@ trap cleanup EXIT INT TERM
 
 LOG_DIR="${TMPDIR:-/tmp}/sim_gru_logs"; mkdir -p "$LOG_DIR"
 echo "sim: $SIM_CONFIG   policy: $POLICY_PATH   logs: $LOG_DIR"
-setsid ./start_sim.sh "$SIM_CONFIG" > "$LOG_DIR/sim.log" 2>&1 &
+setsid bash ./start_sim.sh "$SIM_CONFIG" > "$LOG_DIR/sim.log" 2>&1 &
 PIDS+=($!)
 # first start after boot can be slow (ROS discovery daemon, numba compiling the classic gym)
 for i in $(seq 1 180); do

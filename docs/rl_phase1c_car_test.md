@@ -17,23 +17,71 @@ Both 12 h runs finished (2077 updates). The final checkpoints are the ones to te
 The GRU is about 15% faster per lap. Run the GRU first and keep the MLP-3 as the fallback: it has
 no hidden state, so it is easier to reason about if the car does something odd.
 
-## 1. Sim check (Ubuntu VM, in the dev container)
+## 1. Sim check (dev container: Linux, the VM, or Windows)
 
-`tools/sim_gru_vm.sh` runs on the VM itself (not inside a container). It starts the dev container
-with the VM's display (`docker-compose.linux.yml`), rebuilds `rl_policy` so new models are
-installed, and runs `tools/sim_gru.sh` inside. RViz opens as a normal window. Ctrl-C stops
-everything.
+The sim and the policy run in the `dev` container and RViz opens as a normal window. The scripts
+start the container with this machine's display settings, rebuild `rl_policy` (so new models are
+installed) and run `tools/sim_gru.sh` inside. Ctrl-C stops everything. The first run builds the
+image (10-20 min).
+
+### Linux (Ubuntu laptop or desktop, or the VMware VM)
+
+One-time setup:
+
+```bash
+curl -fsSL https://get.docker.com | sh          # Docker Engine and the compose plugin
+sudo usermod -aG docker $USER                   # then log out and back in
+sudo apt install -y git x11-xserver-utils
+git clone https://github.com/akki-g/roboracer_ros2 ~/roboracer_ros2
+```
+
+From a terminal on the desktop:
 
 ```bash
 cd ~/roboracer_ros2 && git pull
-tools/sim_gru_vm.sh                                   # gru_u02050.npz on Duct1077, until Ctrl-C
-tools/sim_gru_vm.sh gru_u02050.npz 90                 # lap monitor for 90 s, prints laps/crashes, then stops
-tools/sim_gru_vm.sh mlp3_u02050.npz 90                # the MLP-3 fallback
-MAP=EvalDuct3012 tools/sim_gru_vm.sh gru_u02050.npz 90   # a map never used in training or selection
-tools/sim_gru_vm.sh --maps                            # list the maps
+tools/sim_gru_linux.sh                                       # gru_u02050.npz on Duct1077, until Ctrl-C
+tools/sim_gru_linux.sh gru_u02050.npz 90                     # lap monitor for 90 s, prints laps/crashes, then stops
+tools/sim_gru_linux.sh mlp3_u02050.npz 90                    # the MLP-3 fallback
+MAP=EvalDuct3012 tools/sim_gru_linux.sh gru_u02050.npz 90    # a map never used in training or selection
+tools/sim_gru_linux.sh --maps                                # list the maps
 ```
 
-The same thing by hand:
+`tools/sim_gru_vm.sh` still works (it runs the same script). With an NVIDIA driver, RViz renders on
+the CPU inside the container, which is fast enough for this view. Use Docker Engine, not Docker
+Desktop for Linux, which can't share the desktop's display. The container runs as root, so its
+build folders (`build_docker/` etc.) need `sudo rm -rf` to delete.
+
+### Windows (Docker Desktop + WSL 2)
+
+Needs Windows 11, or Windows 10 with WSL from the Microsoft Store: its WSLg shows Linux windows.
+One-time setup in PowerShell (and Git for Windows):
+
+```powershell
+wsl --install -d Ubuntu-22.04                         # admin PowerShell; reboot, create the Ubuntu user
+# Docker Desktop: keep "Use the WSL 2 based engine" on, and turn on
+#   Settings > Resources > WSL integration > Ubuntu-22.04
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned   # lets PowerShell run the repo's script
+git clone https://github.com/akki-g/roboracer_ros2
+```
+
+Then in PowerShell:
+
+```powershell
+cd roboracer_ros2; git pull
+.\tools\sim_gru_windows.ps1                                      # gru_u02050.npz on Duct1077, until Ctrl-C
+.\tools\sim_gru_windows.ps1 gru_u02050.npz 90                    # lap monitor for 90 s
+.\tools\sim_gru_windows.ps1 mlp3_u02050.npz 90                   # the MLP-3 fallback
+.\tools\sim_gru_windows.ps1 gru_u02050.npz 90 -Map EvalDuct3012  # a never-used map
+.\tools\sim_gru_windows.ps1 -Maps                                # list the maps
+```
+
+The script checks WSL and Docker Desktop, then runs `tools/sim_gru_linux.sh` in the WSL distro
+(`-Distro <name>` picks one). It runs faster from a clone inside WSL: in the Ubuntu terminal,
+`git clone https://github.com/akki-g/roboracer_ros2 ~/roboracer_ros2` and use the Linux commands
+above. A clone made before the repo's `.gitattributes` has Windows line endings, which bash can't
+run; the script says so and how to refresh it.
+
+### By hand (Linux)
 
 ```bash
 export COMPOSE_FILE=docker-compose.yml:docker-compose.linux.yml
@@ -66,25 +114,66 @@ have not been run in the ROS sim yet; that is the check above):
 
 ## 2. Car (Jetson)
 
+### Without Docker (recommended: the container's joystick button numbers can differ)
+
+Once, from the repo on the Jetson (ROS 2 Humble installed natively; uses sudo):
+
+```bash
+cd ~/roboracer_ros2 && git pull         # wherever the repo is cloned on the Jetson
+tools/car_native.sh setup               # apt + rosdep deps, dialout/input groups, build, checks
+docker compose stop car                 # if the container is up: only one stack may own the VESC
+```
+
+Log out and back in if setup added you to a group. After every later `git pull`: `tools/car_native.sh
+build`. `tools/car_native.sh check` re-checks the VESC, joystick, LiDAR and groups. Then, in every
+terminal (or put the line in `~/.bashrc`, and source no other workspace with these packages):
+
+```bash
+source /opt/ros/humble/setup.bash && source ~/roboracer_ros2/install/setup.bash
+```
+
+**Check the buttons before every first drive of the day**, with bringup running:
+
+```bash
+ros2 launch f1tenth_stack bringup_launch.py                 # terminal 1
+ros2 topic echo /joy --field buttons                        # terminal 2: hold LB -> index 4 is 1; hold RB -> index 5 is 1
+```
+
+`joy_teleop.yaml` uses button 4 (LB) for manual driving and 5 (RB) as the autonomy deadman. If other
+indices light up, stop: fix the mapping (the F710's switch on the back must be at X) before
+driving. Then:
+
+```bash
+ros2 run rl_policy bench_policy $(ros2 pkg prefix rl_policy)/share/rl_policy/models/gru_u02050.npz
+ros2 launch rl_policy policy.launch.py mode:=car record:=true max_speed:=3.0 \
+  policy_path:=$(ros2 pkg prefix rl_policy)/share/rl_policy/models/gru_u02050.npz                 # terminal 2
+ros2 topic echo /policy_node/debug                                                                 # terminal 3 (optional)
+```
+
+Bags land in the directory you launch from.
+
+### In the container
+
 ```bash
 cd ~/roboracer_ros2 && git pull && docker compose up -d car && docker compose exec car bash
 # inside the container:
 colcon build --packages-select rl_policy && source install_docker/setup.bash
-M=$(ros2 pkg prefix rl_policy)/share/rl_policy/models
-ros2 run rl_policy bench_policy $M/gru_u02050.npz
-ros2 run rl_policy bench_policy $M/mlp3_u02050.npz
+ros2 run rl_policy bench_policy $(ros2 pkg prefix rl_policy)/share/rl_policy/models/gru_u02050.npz
 ```
 
-Pass: `PASS` (p99 < 5 ms; the Mac does 0.27 ms p99 for the GRU, 0.03 ms for the MLP-3). Then, each
-terminal a `docker compose exec car bash` with `install_docker` sourced and `M` set as above:
+Each terminal is a `docker compose exec car bash` (`.bashrc` sources `install_docker`), then the same
+bringup and launch lines as above, and the same button check.
 
-```bash
-ros2 launch f1tenth_stack bringup_launch.py                                                       # terminal 1
-ros2 launch rl_policy policy.launch.py mode:=car policy_path:=$M/gru_u02050.npz record:=true      # terminal 2
-ros2 topic echo /policy_node/debug                                                                 # terminal 3 (optional)
-```
+### Both
 
-Fallback: the same terminal 2 line with `$M/mlp3_u02050.npz`.
+Bench pass: `PASS` (p99 < 5 ms; the Mac does 0.16 ms for the GRU, 0.03 ms for the MLP-3). The
+policy pins NumPy to one BLAS thread (a thread pool gave latency spikes). If it fails, the median is
+rarely the problem: run `sudo nvpmodel -m 0 && sudo jetson_clocks` (full clocks until reboot), stop
+other CPU load, and run it again. While driving, `policy_ms` in `/policy_node/debug` is the live
+check. The launch line spells out the full policy path: an empty `$M` gives
+`no usable policy at '/gru_u02050.npz'` (the node then holds speed 0).
+
+Fallback: the same launch line with `mlp3_u02050.npz`. Drop `max_speed:=3.0` after the first slow laps.
 
 **Driving:** the policy's `/drive` reaches the motor only while the autonomy deadman (button 5,
 RB on the F710) is held. Release it and the joystick's zero command takes over within 0.2 s.
