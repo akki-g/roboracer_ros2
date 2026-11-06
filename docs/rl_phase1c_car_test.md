@@ -17,23 +17,71 @@ Both 12 h runs finished (2077 updates). The final checkpoints are the ones to te
 The GRU is about 15% faster per lap. Run the GRU first and keep the MLP-3 as the fallback: it has
 no hidden state, so it is easier to reason about if the car does something odd.
 
-## 1. Sim check (Ubuntu VM, in the dev container)
+## 1. Sim check (dev container: Linux, the VM, or Windows)
 
-`tools/sim_gru_vm.sh` runs on the VM itself (not inside a container). It starts the dev container
-with the VM's display (`docker-compose.linux.yml`), rebuilds `rl_policy` so new models are
-installed, and runs `tools/sim_gru.sh` inside. RViz opens as a normal window. Ctrl-C stops
-everything.
+The sim and the policy run in the `dev` container and RViz opens as a normal window. The scripts
+start the container with this machine's display settings, rebuild `rl_policy` (so new models are
+installed) and run `tools/sim_gru.sh` inside. Ctrl-C stops everything. The first run builds the
+image (10-20 min).
+
+### Linux (Ubuntu laptop or desktop, or the VMware VM)
+
+One-time setup:
+
+```bash
+curl -fsSL https://get.docker.com | sh          # Docker Engine and the compose plugin
+sudo usermod -aG docker $USER                   # then log out and back in
+sudo apt install -y git x11-xserver-utils
+git clone https://github.com/akki-g/roboracer_ros2 ~/roboracer_ros2
+```
+
+From a terminal on the desktop:
 
 ```bash
 cd ~/roboracer_ros2 && git pull
-tools/sim_gru_vm.sh                                   # gru_u02050.npz on Duct1077, until Ctrl-C
-tools/sim_gru_vm.sh gru_u02050.npz 90                 # lap monitor for 90 s, prints laps/crashes, then stops
-tools/sim_gru_vm.sh mlp3_u02050.npz 90                # the MLP-3 fallback
-MAP=EvalDuct3012 tools/sim_gru_vm.sh gru_u02050.npz 90   # a map never used in training or selection
-tools/sim_gru_vm.sh --maps                            # list the maps
+tools/sim_gru_linux.sh                                       # gru_u02050.npz on Duct1077, until Ctrl-C
+tools/sim_gru_linux.sh gru_u02050.npz 90                     # lap monitor for 90 s, prints laps/crashes, then stops
+tools/sim_gru_linux.sh mlp3_u02050.npz 90                    # the MLP-3 fallback
+MAP=EvalDuct3012 tools/sim_gru_linux.sh gru_u02050.npz 90    # a map never used in training or selection
+tools/sim_gru_linux.sh --maps                                # list the maps
 ```
 
-The same thing by hand:
+`tools/sim_gru_vm.sh` still works (it runs the same script). With an NVIDIA driver, RViz renders on
+the CPU inside the container, which is fast enough for this view. Use Docker Engine, not Docker
+Desktop for Linux, which can't share the desktop's display. The container runs as root, so its
+build folders (`build_docker/` etc.) need `sudo rm -rf` to delete.
+
+### Windows (Docker Desktop + WSL 2)
+
+Needs Windows 11, or Windows 10 with WSL from the Microsoft Store: its WSLg shows Linux windows.
+One-time setup in PowerShell (and Git for Windows):
+
+```powershell
+wsl --install -d Ubuntu-22.04                         # admin PowerShell; reboot, create the Ubuntu user
+# Docker Desktop: keep "Use the WSL 2 based engine" on, and turn on
+#   Settings > Resources > WSL integration > Ubuntu-22.04
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned   # lets PowerShell run the repo's script
+git clone https://github.com/akki-g/roboracer_ros2
+```
+
+Then in PowerShell:
+
+```powershell
+cd roboracer_ros2; git pull
+.\tools\sim_gru_windows.ps1                                      # gru_u02050.npz on Duct1077, until Ctrl-C
+.\tools\sim_gru_windows.ps1 gru_u02050.npz 90                    # lap monitor for 90 s
+.\tools\sim_gru_windows.ps1 mlp3_u02050.npz 90                   # the MLP-3 fallback
+.\tools\sim_gru_windows.ps1 gru_u02050.npz 90 -Map EvalDuct3012  # a never-used map
+.\tools\sim_gru_windows.ps1 -Maps                                # list the maps
+```
+
+The script checks WSL and Docker Desktop, then runs `tools/sim_gru_linux.sh` in the WSL distro
+(`-Distro <name>` picks one). It runs faster from a clone inside WSL: in the Ubuntu terminal,
+`git clone https://github.com/akki-g/roboracer_ros2 ~/roboracer_ros2` and use the Linux commands
+above. A clone made before the repo's `.gitattributes` has Windows line endings, which bash can't
+run; the script says so and how to refresh it.
+
+### By hand (Linux)
 
 ```bash
 export COMPOSE_FILE=docker-compose.yml:docker-compose.linux.yml

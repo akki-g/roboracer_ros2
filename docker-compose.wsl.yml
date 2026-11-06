@@ -1,0 +1,24 @@
+# Windows: WSL 2 + Docker Desktop (WSL integration on for your distro). RViz opens as a
+# normal Windows window through WSLg. tools/sim_gru_linux.sh uses it when it runs in WSL
+# (tools/sim_gru_windows.ps1 starts that from PowerShell). By hand, from the WSL terminal:
+#   docker compose -f docker-compose.yml -f docker-compose.wsl.yml up -d dev
+services:
+  dev:
+    environment:
+      DISPLAY: ":0"
+      LIBGL_ALWAYS_SOFTWARE: "1"   # no GPU in the container: RViz renders on the CPU
+      QT_X11_NO_MITSHM: "1"        # WSLg's X server can't share memory with the container
+    volumes:
+      - /mnt/wslg/.X11-unix:/tmp/.X11-unix   # WSLg's X server
+      # colcon output in Docker volumes instead of the repo folder: a repo on a Windows
+      # drive (/mnt/c/...) can't hold the Linux symlinks of colcon's symlink install.
+      - build_docker:/root/ros2_ws/build_docker
+      - install_docker:/root/ros2_ws/install_docker
+      - log_docker:/root/ros2_ws/log_docker
+    ports:
+      - "8765:8765"                # Foxglove: ws://localhost:8765
+
+volumes:
+  build_docker:
+  install_docker:
+  log_docker:
