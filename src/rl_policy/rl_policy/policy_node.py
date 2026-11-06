@@ -33,13 +33,16 @@ from .safety import DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, 
 
 SCAN_ANGLE_TOL = 0.01  # rad, on angle_min
 SCAN_INCREMENT_TOL = 2e-5  # rad; f1tenth_gym_ros publishes fov/N instead of fov/(N-1)
-POLICY_ANGLES = -ob.FOV / 2 + np.arange(ob.NUM_BEAMS) * (ob.FOV / (ob.NUM_BEAMS - 1))
+def policy_angles(num_beams=ob.NUM_BEAMS):
+    """The policy's beam angles: num_beams evenly over [-FOV/2, FOV/2]."""
+    return -ob.FOV / 2 + np.arange(num_beams) * (ob.FOV / (num_beams - 1))
 
 
-def resample_indices(angle_min, angle_increment, n):
+def resample_indices(angle_min, angle_increment, n, angles=None):
     """Nearest beam of an n-beam scan to each policy angle, and the worst angle error."""
-    idx = np.clip(np.rint((POLICY_ANGLES - angle_min) / angle_increment), 0, n - 1).astype(int)
-    err = np.max(np.abs(angle_min + idx * angle_increment - POLICY_ANGLES))
+    angles = policy_angles() if angles is None else angles
+    idx = np.clip(np.rint((angles - angle_min) / angle_increment), 0, n - 1).astype(int)
+    err = np.max(np.abs(angle_min + idx * angle_increment - angles))
     return idx, float(err)
 
 
@@ -70,6 +73,9 @@ class PolicyNode(Node):
         self.enabled = bool(self.get_parameter("enabled").value)
         self.add_on_set_parameters_callback(self._on_set_parameters)
 
+        # observation layout: obs.py defaults until a policy says otherwise
+        self.beam_idx, self.num_beams, self.frame_stack = ob.CAR_BEAM_INDICES, ob.NUM_BEAMS, ob.FRAME_STACK
+        self.policy_angles = policy_angles(self.num_beams)
         path = os.path.expanduser(self.get_parameter("policy_path").value)
         self.policy = None
         try:
@@ -89,7 +95,7 @@ class PolicyNode(Node):
 
         self.scan = None  # (receive time, ranges ndarray, angles ndarray, range_min)
         self.scan_ok = False
-        self.scan_idx = ob.CAR_BEAM_INDICES
+        self.scan_idx = self.beam_idx
         self.scan_resample = bool(self.get_parameter("scan_resample").value)
         self.resample_tol = math.radians(float(self.get_parameter("resample_tol_deg").value))
         self._layout = None
@@ -150,10 +156,19 @@ class PolicyNode(Node):
         return SetParametersResult(successful=True)
 
     def _check_policy_config(self, cfg):
-        if cfg["obs_dim"] != ob.OBS_DIM or cfg["frame_stack"] != ob.FRAME_STACK:
-            raise ValueError("policy observation layout differs from obs.py")
-        if list(cfg["beam_indices"]) != ob.CAR_BEAM_INDICES.tolist():
-            raise ValueError("policy beam indices differ from obs.py")
+        """Take the observation layout from the policy (phase-1 files: 109 beams,
+        stack 3; phase 1c: 271 beams) and check it is one obs.py can build."""
+        arch = cfg.get("arch", "mlp")
+        if arch != "mlp":
+            raise ValueError(f"policy arch {arch!r} is not supported by this node yet")
+        idx = np.asarray(cfg["beam_indices"], dtype=int)
+        if idx.tolist() != ob.beam_indices(len(idx)).tolist():
+            raise ValueError("policy beam indices are not evenly spaced over the car's 1081 beams")
+        frame_stack = int(cfg["frame_stack"])
+        if cfg["obs_dim"] != ob.obs_dim(frame_stack, len(idx)):
+            raise ValueError("policy obs_dim does not match its beams and frame stack")
+        self.beam_idx, self.num_beams, self.frame_stack = idx, len(idx), frame_stack
+        self.policy_angles = policy_angles(self.num_beams)
 
     # ------------------------------------------------------------- callbacks
     def _on_scan(self, msg: LaserScan):
@@ -169,13 +184,13 @@ class PolicyNode(Node):
                 and abs(msg.angle_increment - ob.FOV / (ob.CAR_SCAN_BEAMS - 1)) < SCAN_INCREMENT_TOL
             )
             if ust10lx:
-                self.scan_idx, self._layout_ok = ob.CAR_BEAM_INDICES, True
+                self.scan_idx, self._layout_ok = self.beam_idx, True
             elif self.scan_resample and n > 1 and msg.angle_increment > 0:
-                self.scan_idx, err = resample_indices(msg.angle_min, msg.angle_increment, n)
+                self.scan_idx, err = resample_indices(msg.angle_min, msg.angle_increment, n, self.policy_angles)
                 self._layout_ok = err <= self.resample_tol
                 log = self.get_logger().warn if self._layout_ok else self.get_logger().error
                 log(f"scan has {n} beams from {msg.angle_min:.4f} rad: resampling to the policy's "
-                    f"{ob.NUM_BEAMS} angles, worst error {math.degrees(err):.2f} deg "
+                    f"{self.num_beams} angles, worst error {math.degrees(err):.2f} deg "
                     f"({'ok' if self._layout_ok else 'too large, commanding speed 0'})")
             else:
                 self._layout_ok = False
@@ -212,7 +227,7 @@ class PolicyNode(Node):
             _, ranges, _, _ = self.scan
             scan_norm = ob.normalize_scan(ranges[self.scan_idx])
             if not self.active:  # (re)activation: fresh stack, stopped previous action
-                self.stack = ob.init_stack(scan_norm)
+                self.stack = ob.init_stack(scan_norm, self.frame_stack)
                 self.prev_action = ob.reset_action()
                 self.active = True
                 self.get_logger().info("policy active: frame stack and previous action reset")
@@ -257,7 +272,7 @@ class PolicyNode(Node):
             "min_ttc": None if math.isinf(ttc) else round(ttc, 3),
             "obs_summary": None if self.stack is None else {
                 "scan_min_m": float(self.stack[0].min() * ob.MAX_RANGE),
-                "scan_front_m": float(self.stack[0][ob.NUM_BEAMS // 2] * ob.MAX_RANGE),
+                "scan_front_m": float(self.stack[0][self.num_beams // 2] * ob.MAX_RANGE),
                 "scan_mean_m": float(self.stack[0].mean() * ob.MAX_RANGE),
                 "speed_norm": speed_meas / ob.V_CMD_MAX,
                 "prev_action": [float(x) for x in self.prev_action],
