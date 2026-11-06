@@ -4,7 +4,8 @@
     ros2 launch rl_policy policy.launch.py mode:=car max_speed:=1.0
 
 mode selects config/policy_<mode>.yaml (topics); max_speed overrides the
-yaml (default 1.5 m/s). A bag of /scan, odom, /drive and the debug topic is
+yaml (default 1.5 m/s). scale_speed:=true maps the policy's 0-8 m/s onto
+0..max_speed instead of clamping at max_speed. A bag of /scan, odom, /drive and the debug topic is
 recorded when record:=true.
 """
 
@@ -28,9 +29,10 @@ def _nodes(context):
     max_speed = LaunchConfiguration('max_speed').perform(context)
     if max_speed:
         overrides['max_speed'] = float(max_speed)
-    ttc_brake = LaunchConfiguration('ttc_brake').perform(context)
-    if ttc_brake:
-        overrides['ttc_brake'] = ttc_brake.lower() in ('1', 'true', 'yes')
+    for name in ('ttc_brake', 'scale_speed'):
+        value = LaunchConfiguration(name).perform(context)
+        if value:
+            overrides[name] = value.lower() in ('1', 'true', 'yes')
     odom = '/ego_racecar/odom' if mode == 'sim' else '/odom'
     return [
         Node(package='rl_policy', executable='policy_node', name='policy_node', output='screen',
@@ -48,6 +50,9 @@ def generate_launch_description():
         DeclareLaunchArgument('policy_path', default_value=default_policy),
         DeclareLaunchArgument('max_speed', default_value='', description='m/s; empty keeps the yaml value'),
         DeclareLaunchArgument('ttc_brake', default_value='', description='true/false; empty keeps the yaml value'),
+        DeclareLaunchArgument('scale_speed', default_value='',
+                              description='true: scale the policy speed range onto 0..max_speed instead of clamping; '
+                                          'empty keeps the yaml value'),
         DeclareLaunchArgument('record', default_value='false'),
         OpaqueFunction(function=_nodes),
     ])
