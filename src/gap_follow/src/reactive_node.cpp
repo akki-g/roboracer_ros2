@@ -209,7 +209,7 @@ private:
     } else {
       speed = 2.0f;
     }
-    speed = std::min(speed, std::max(0.6f, 0.5f * front_dist));
+    // speed = std::min(speed, std::max(0.6f, 0.5f * front_dist));
 
     // Publish Drive message
     ackermann_msgs::msg::AckermannDriveStamped drive_msg;
