@@ -203,7 +203,7 @@ private:
     const float abs_steer = std::fabs(steering_angle);
     float speed;
     if (abs_steer < 8.0f * M_PI / 180.0f) {
-      speed = 3f;
+      speed = 3.0f;
     } else if (abs_steer < 16.0f * M_PI / 180.0f) {
       speed = 2.0f;
     } else {
