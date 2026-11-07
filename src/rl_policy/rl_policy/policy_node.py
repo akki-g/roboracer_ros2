@@ -33,7 +33,7 @@ from std_msgs.msg import String
 
 from . import obs as ob
 from .numpy_policy import NumpyPolicy
-from .safety import DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, map_speed, min_ttc
+from .safety import DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, min_ttc, shape_speed
 
 # Training ends an episode after 2 s below 0.2 m/s; the node mirrors that by
 # resetting the stack, previous action and recurrent state (a fresh episode),
@@ -71,6 +71,8 @@ class PolicyNode(Node):
         # Map the policy's 0..v_cmd_max speed range onto 0..max_speed instead of clamping.
         self.declare_parameter("scale_speed", False)
         self.declare_parameter("scale_knee", 0.7)  # scale_speed: unchanged below this fraction of max_speed
+        self.declare_parameter("speed_gain", 1.0)  # multiplies the policy's speed request
+        self.declare_parameter("min_speed", 0.0)  # m/s: floor for moving requests (0 = off)
         self.declare_parameter("scan_timeout", 0.1)
         self.declare_parameter("odom_timeout", 0.2)
         self.declare_parameter("enabled", True)
@@ -130,6 +132,7 @@ class PolicyNode(Node):
         self.get_logger().info(
             f"policy_node: {rate:.0f} Hz, max_speed {self.safety.max_speed} m/s "
             f"({'scaled' if self.safety.scale_speed else 'clamped'}), "
+            f"speed gain {self.safety.speed_gain:g}, min speed {self.safety.min_speed:g} m/s, "
             f"scan {self.get_parameter('scan_topic').value}, odom {self.get_parameter('odom_topic').value}, "
             f"drive {self.get_parameter('drive_topic').value}")
 
@@ -144,13 +147,15 @@ class PolicyNode(Node):
             ttc_brake=bool(get("ttc_brake")),
             scale_speed=bool(get("scale_speed")),
             scale_knee=float(get("scale_knee")),
+            speed_gain=float(get("speed_gain")),
+            min_speed=float(get("min_speed")),
             scan_timeout=float(get("scan_timeout")),
             odom_timeout=float(get("odom_timeout")),
         )
 
     def _on_set_parameters(self, params):
         names = ("max_speed", "steer_limit", "ttc_threshold", "ttc_half_angle_deg", "ttc_brake",
-                 "scale_speed", "scale_knee", "scan_timeout", "odom_timeout")
+                 "scale_speed", "scale_knee", "speed_gain", "min_speed", "scan_timeout", "odom_timeout")
         current = {n: self.get_parameter(n).value for n in names}
         enabled = self.enabled
         for p in params:
@@ -271,7 +276,7 @@ class PolicyNode(Node):
             self.forward_ms.append((time.perf_counter() - t0) * 1e3)
             speed_cmd, steer_cmd = ob.action_to_command(raw_action, self.v_cmd_max, self.steer_max)
             policy_speed = float(speed_cmd)
-            speed_cmd = map_speed(policy_speed, self.safety, self.v_cmd_max)  # scale_speed: knee mapping
+            speed_cmd = shape_speed(policy_speed, self.safety, self.v_cmd_max)  # gain, scale_speed, min_speed
         elif self.active:
             self.active = False
             self.get_logger().warn(

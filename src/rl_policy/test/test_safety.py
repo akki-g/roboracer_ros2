@@ -134,3 +134,35 @@ def test_map_speed_knee():
     assert map_speed(5.0, SafetyConfig(max_speed=3.0), 8.0) == 5.0  # off: unchanged (then clamped)
     assert map_speed(5.0, SafetyConfig(max_speed=10.0, scale_speed=True), 8.0) == 5.0  # cap above the range
     assert map_speed(4.0, SafetyConfig(max_speed=3.0, scale_speed=True, scale_knee=0.0), 8.0) == pytest.approx(1.5)  # linear
+
+
+def test_speed_gain_and_min_speed():
+    from rl_policy.safety import MIN_SPEED_FROM, shape_speed
+
+    off = SafetyConfig(max_speed=10.0)
+    assert shape_speed(3.0, off, 8.0) == 3.0 and shape_speed(0.2, off, 8.0) == 0.2  # both off by default
+    gain = SafetyConfig(max_speed=10.0, speed_gain=1.2)
+    assert shape_speed(3.0, gain, 8.0) == pytest.approx(3.6)
+    floor = SafetyConfig(max_speed=10.0, min_speed=0.5)
+    assert shape_speed(0.2, floor, 8.0) == 0.5  # a crawl is lifted to the floor
+    assert shape_speed(0.0, floor, 8.0) == 0.0 and shape_speed(MIN_SPEED_FROM, floor, 8.0) == MIN_SPEED_FROM  # stop stays
+    assert shape_speed(2.0, floor, 8.0) == 2.0  # faster requests untouched
+    both = SafetyConfig(max_speed=4.0, speed_gain=1.5, min_speed=0.5)
+    r = apply_safety(shape_speed(3.0, both, 8.0), 0.0, both, scan_age=0.0, odom_age=0.0, ttc=math.inf)
+    assert r.speed == 4.0 and "speed_cap" in r.overrides  # the cap still wins after the gain
+
+
+def test_min_speed_never_beats_the_brakes():
+    from rl_policy.safety import shape_speed
+
+    cfg = SafetyConfig(max_speed=10.0, min_speed=0.6, ttc_brake=True)
+    s = shape_speed(0.2, cfg, 8.0)
+    assert apply_safety(s, 0.0, cfg, scan_age=0.0, odom_age=0.0, ttc=0.1).speed == 0.0  # emergency brake
+    assert apply_safety(s, 0.0, cfg, scan_age=1.0, odom_age=0.0, ttc=math.inf).speed == 0.0  # watchdog
+
+
+def test_gain_and_floor_validation():
+    for bad in (dict(speed_gain=0.2), dict(speed_gain=3.0), dict(min_speed=-0.1), dict(min_speed=5.0)):
+        with pytest.raises(ValueError):
+            SafetyConfig(**bad).validate()
+    SafetyConfig(speed_gain=1.3, min_speed=0.5).validate()

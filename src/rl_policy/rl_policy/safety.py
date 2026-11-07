@@ -1,5 +1,15 @@
 """Safety layer for the RL policy node (spec section 7.3), free of ROS so it
-can be unit-tested. Applied after the policy, in this order:
+can be unit-tested. The policy's speed request is first shaped (shape_speed):
+
+0. speed_gain        multiplies it (default 1.0, off);
+   scale_speed       optional knee mapping onto [0, max_speed] (map_speed());
+   min_speed         raises requests between MIN_SPEED_FROM and min_speed to
+                     min_speed (default 0.0, off): the car's motor cannot hold
+                     crawling speeds, so a policy asking for 0.1-0.3 m/s sits
+                     still and can stay stuck. Requests at or below
+                     MIN_SPEED_FROM (the policy stopping) stay as they are.
+
+Then, in this order (each can only lower the speed, down to the brakes' 0):
 
 1. Speed cap         clamp the speed command to max_speed (default 1.5 m/s).
                      With scale_speed, the node first maps the policy's speed
@@ -28,6 +38,9 @@ from dataclasses import dataclass, field
 import numpy as np
 
 DEFAULT_MAX_SPEED = 1.5  # m/s; do not raise the default
+MIN_SPEED_FROM = 0.05  # m/s: min_speed lifts requests above this (lower ones mean "stop")
+SPEED_GAIN_RANGE = (0.5, 2.0)
+MIN_SPEED_MAX = 2.0  # m/s
 STEER_LIMIT = 0.4422  # rad: the car's smaller full lock (servo end stop with gain -0.9, offset 0.552; was 0.4189)
 TTC_THRESHOLD = 0.5  # s
 TTC_HALF_ANGLE = math.radians(30.0)
@@ -44,6 +57,8 @@ class SafetyConfig:
     ttc_brake: bool = True
     scale_speed: bool = False
     scale_knee: float = 0.7  # fraction of max_speed below which scale_speed leaves the speed unchanged
+    speed_gain: float = 1.0  # multiplies the policy's speed request
+    min_speed: float = 0.0  # m/s: floor for moving requests (0 = off)
     scan_timeout: float = SCAN_TIMEOUT
     odom_timeout: float = ODOM_TIMEOUT
 
@@ -54,6 +69,10 @@ class SafetyConfig:
             raise ValueError(f"steer_limit must be in (0, {STEER_LIMIT}]")
         if not (self.ttc_threshold >= 0.0 and self.scan_timeout > 0.0 and self.odom_timeout > 0.0):
             raise ValueError("ttc_threshold must be >= 0 and timeouts > 0")
+        if not (SPEED_GAIN_RANGE[0] <= self.speed_gain <= SPEED_GAIN_RANGE[1]):
+            raise ValueError(f"speed_gain must be in [{SPEED_GAIN_RANGE[0]}, {SPEED_GAIN_RANGE[1]}]")
+        if not (0.0 <= self.min_speed <= MIN_SPEED_MAX):
+            raise ValueError(f"min_speed must be in [0, {MIN_SPEED_MAX}] m/s")
 
 
 @dataclass
@@ -74,6 +93,15 @@ def map_speed(speed, cfg, v_cmd_max):
     if speed <= k:
         return float(speed)
     return float(k + (speed - k) * (cfg.max_speed - k) / (v_cmd_max - k))
+
+
+def shape_speed(speed, cfg, v_cmd_max):
+    """The policy's speed request with speed_gain, the scale_speed mapping and the min_speed floor
+    applied, before the cap and the brakes (apply_safety)."""
+    speed = map_speed(float(speed) * cfg.speed_gain, cfg, v_cmd_max)
+    if cfg.min_speed > 0.0 and MIN_SPEED_FROM < speed < cfg.min_speed:
+        speed = cfg.min_speed
+    return float(speed)
 
 
 def min_ttc(ranges, angles, speed, half_angle=TTC_HALF_ANGLE, range_min=0.0):
