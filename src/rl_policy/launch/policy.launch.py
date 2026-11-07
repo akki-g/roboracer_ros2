@@ -48,8 +48,9 @@ def _nodes(context):
 
 
 def generate_launch_description():
-    # the best tested policy; policy.npz is the phase-1 MLP (update 325), kept for comparison only
-    default_policy = os.path.join(get_package_share_directory('rl_policy'), 'models', 'gru_u02050.npz')
+    # the lab fine-tuned CNN+GRU (solo, update 950; see models/README.md for the race-trained ones);
+    # policy.npz is the phase-1 MLP (update 325), kept for comparison only
+    default_policy = os.path.join(get_package_share_directory('rl_policy'), 'models', 'gru1025_solo_u0950.npz')
     return LaunchDescription([
         DeclareLaunchArgument('mode', default_value='car', description='car or sim'),
         DeclareLaunchArgument('policy_path', default_value=default_policy),
