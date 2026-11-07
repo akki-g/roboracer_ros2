@@ -11,6 +11,8 @@
 #   MAP=LastRace2 tools/sim_gru_linux.sh gru1025_solo_u0950.npz              # the last race's track
 #   MAP=LastRace2Obs tools/sim_gru_linux.sh gru1025_obs_u0750.npz            # ... with parked cars
 #   MAP=LastRace2 OPP_SPEED=1.0-4.0 tools/sim_gru_linux.sh gru1025_opp_u0750.npz  # ... with an opponent car
+#   POLICY_ARGS="speed_smoothing:=0.5 min_speed:=0.5" MAP=LastRace2 tools/sim_gru_linux.sh gru1025_obs_u0750.npz
+#   CAR_HOST=192.168.0.15 ... (also sends the commands to the car on a stand; see tools/sim_gru.sh)
 #
 # Needs Docker with the compose plugin. Linux: Docker Engine, with your user in the docker group.
 # Windows: Docker Desktop (WSL 2 engine) with WSL integration on for this distro.
@@ -40,7 +42,7 @@ if ! err=$(docker info 2>&1 >/dev/null); then
 fi
 
 EXEC_ENV=(-e "MAP=${MAP:-}" -e "SIM_CONFIG=${SIM_CONFIG:-}" -e "OPP_SPEED=${OPP_SPEED:-}" -e "OPP_GAP=${OPP_GAP:-}"
-          -e "OPP_PERIOD=${OPP_PERIOD:-}")
+          -e "OPP_PERIOD=${OPP_PERIOD:-}" -e "POLICY_ARGS=${POLICY_ARGS:-}" -e "CAR_HOST=${CAR_HOST:-}")
 if [ -n "$WSL" ]; then
   [ -S /mnt/wslg/.X11-unix/X0 ] ||
     die "WSLg is missing (no /mnt/wslg/.X11-unix/X0). It needs Windows 11, or Windows 10 with WSL from the Microsoft Store: in PowerShell run  wsl --update  then  wsl --shutdown, and try again"

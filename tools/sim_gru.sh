@@ -12,6 +12,9 @@
 #   MAP=LastRace2 OPP_SPEED=1.0 tools/sim_gru.sh gru1025_opp_u0750.npz       # at 1 m/s
 #   MAP=LastRace2 OPP_SPEED=1.0-4.0 tools/sim_gru.sh gru1025_opp_u0750.npz   # a new speed in 1-4 m/s every 6 s
 #   OPP_GAP=4.0 (m ahead of the ego at the start; negative: behind), OPP_PERIOD=6.0 (s between speed changes)
+# POLICY_ARGS adds launch arguments to the policy node, e.g. POLICY_ARGS="speed_smoothing:=0.5 min_speed:=0.5".
+# CAR_HOST=<car ip> also sends the sim policy's /drive to the real car over UDP (car ON A STAND, running
+#   ros2 run rl_policy drive_relay --ros-args -p mode:=receive  with its bringup and RB held).
 #
 # Needs: ROS 2 Humble and the sim workspace sourced, and `colcon build --packages-select rl_policy`
 # done in this repo (the script builds it if the install is missing). Ctrl-C stops everything.
@@ -90,7 +93,8 @@ for i in $(seq 1 180); do
 done
 ros2 topic list 2>/dev/null | grep -q ego_racecar/odom || { echo "sim did not come up; see $LOG_DIR/sim.log" >&2; exit 1; }
 echo "sim up"
-setsid ros2 launch rl_policy policy.launch.py mode:=sim policy_path:="$POLICY_PATH" > "$LOG_DIR/policy.log" 2>&1 &
+# shellcheck disable=SC2086
+setsid ros2 launch rl_policy policy.launch.py mode:=sim policy_path:="$POLICY_PATH" ${POLICY_ARGS:-} > "$LOG_DIR/policy.log" 2>&1 &
 PIDS+=($!)
 sleep 4
 grep -E "loaded|resampling|refus|error" "$LOG_DIR/policy.log" | sed 's/^/  /' | cut -c1-180 || true
@@ -107,6 +111,11 @@ if [ -n "$OPP_SPEED" ]; then
     exit 1
   fi
   echo "opponent: $OPP_SPEED m/s, starting ${OPP_GAP:-4.0} m ahead   log: $LOG_DIR/opponent.log"
+fi
+if [ -n "${CAR_HOST:-}" ]; then
+  setsid ros2 run rl_policy drive_relay --ros-args -p mode:=send -p host:="$CAR_HOST" > "$LOG_DIR/relay.log" 2>&1 &
+  PIDS+=($!)
+  echo "relaying /drive to the car at $CAR_HOST (UDP 5555; the car must be on a stand, RB held)   log: $LOG_DIR/relay.log"
 fi
 
 if [ -n "$MONITOR_S" ]; then
