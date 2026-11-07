@@ -28,12 +28,12 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rcl_interfaces.msg import SetParametersResult
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Joy, LaserScan
 from std_msgs.msg import String
 
 from . import obs as ob
 from .numpy_policy import NumpyPolicy
-from .safety import DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, min_ttc, shape_speed
+from .safety import DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, deadman_held, min_ttc, shape_speed
 
 # Training ends an episode after 2 s below 0.2 m/s; the node mirrors that by
 # resetting the stack, previous action and recurrent state (a fresh episode),
@@ -76,6 +76,10 @@ class PolicyNode(Node):
         self.declare_parameter("scan_timeout", 0.1)
         self.declare_parameter("odom_timeout", 0.2)
         self.declare_parameter("enabled", True)
+        # >= 0: drive only while this /joy button is held (RB = 5, joy_teleop's autonomous deadman); -1: off
+        self.declare_parameter("deadman_button", -1)
+        self.declare_parameter("joy_topic", "/joy")
+        self.declare_parameter("joy_timeout", 0.5)  # s: an older /joy counts as released
         # Off on the car: anything but the UST-10LX's 1081 beams stops the car.
         # On in the ROS sim, whose LiDAR is fixed at 1080 beams over 4.7 rad:
         # take the nearest beam to each policy angle if within resample_tol_deg.
@@ -121,6 +125,10 @@ class PolicyNode(Node):
         self.forward_ms = deque(maxlen=500)  # policy forward-pass times, for the debug topic
         self.stopped_ticks = 0
         self.stall_resets = 0
+        self.deadman_button = int(self.get_parameter("deadman_button").value)
+        self.joy_timeout = float(self.get_parameter("joy_timeout").value)
+        self.joy = None  # (receive time, buttons)
+        self.deadman_ok = self.deadman_button < 0
 
         self.drive_pub = self.create_publisher(
             AckermannDriveStamped, self.get_parameter("drive_topic").value, 10)
@@ -128,6 +136,8 @@ class PolicyNode(Node):
         self.create_subscription(LaserScan, self.get_parameter("scan_topic").value,
                                  self._on_scan, qos_profile_sensor_data)
         self.create_subscription(Odometry, self.get_parameter("odom_topic").value, self._on_odom, 10)
+        if self.deadman_button >= 0:
+            self.create_subscription(Joy, self.get_parameter("joy_topic").value, self._on_joy, 10)
         self.timer = self.create_timer(1.0 / rate, self._tick)
         self.get_logger().info(
             f"policy_node: {rate:.0f} Hz, max_speed {self.safety.max_speed} m/s "
@@ -228,6 +238,9 @@ class PolicyNode(Node):
         self.scan = (now, ranges, angles, float(msg.range_min))
         self.scan_ok = ok
 
+    def _on_joy(self, msg: Joy):
+        self.joy = (self.get_clock().now().nanoseconds * 1e-9, list(msg.buttons))
+
     def _on_odom(self, msg: Odometry):
         now = self.get_clock().now().nanoseconds * 1e-9
         self.odom = (now, float(msg.twist.twist.linear.x))
@@ -239,7 +252,13 @@ class PolicyNode(Node):
         odom_age = now - self.odom[0] if self.odom else math.inf
         speed_meas = self.odom[1] if self.odom else 0.0
         fresh = scan_age <= self.safety.scan_timeout and odom_age <= self.safety.odom_timeout
-        usable = self.policy is not None and self.scan_ok and self.enabled
+        joy_age = now - self.joy[0] if self.joy else math.inf
+        deadman_ok = deadman_held(self.deadman_button, self.joy[1] if self.joy else [], joy_age, self.joy_timeout)
+        if deadman_ok != self.deadman_ok:
+            self.deadman_ok = deadman_ok
+            self.get_logger().info(f"deadman (button {self.deadman_button}) "
+                                   f"{'held: policy drives' if deadman_ok else 'released: speed 0'}")
+        usable = self.policy is not None and self.scan_ok and self.enabled and deadman_ok
 
         raw_action = None
         speed_cmd, steer_cmd = 0.0, 0.0
@@ -281,7 +300,7 @@ class PolicyNode(Node):
             self.active = False
             self.get_logger().warn(
                 f"policy inactive (scan age {scan_age:.3f}s, odom age {odom_age:.3f}s, "
-                f"scan ok {self.scan_ok}, enabled {self.enabled}); commanding speed 0")
+                f"scan ok {self.scan_ok}, enabled {self.enabled}, deadman {self.deadman_ok}); commanding speed 0")
 
         result = apply_safety(speed_cmd, steer_cmd, self.safety, scan_age=scan_age, odom_age=odom_age,
                               ttc=ttc, valid=usable)
@@ -303,6 +322,7 @@ class PolicyNode(Node):
         debug = {
             "t": now,
             "active": self.active,
+            "deadman": self.deadman_ok,
             "speed_meas": speed_meas,
             "scan_age": None if math.isinf(scan_age) else round(scan_age, 4),
             "odom_age": None if math.isinf(odom_age) else round(odom_age, 4),

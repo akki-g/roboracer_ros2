@@ -15,6 +15,7 @@ policy_node:
     scale_knee: 0.7
     speed_gain: 1.0         # multiplies the policy's speed request
     min_speed: 0.0          # m/s floor for moving requests (0 = off; ~0.5 gets the car out of crawls)
+    deadman_button: -1        # no joystick in the sim
     scan_timeout: 0.1
     odom_timeout: 0.2
     # f1tenth_gym's LiDAR is fixed at 1080 beams over 4.7 rad (the bridge's

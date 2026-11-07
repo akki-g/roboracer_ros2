@@ -166,3 +166,15 @@ def test_gain_and_floor_validation():
         with pytest.raises(ValueError):
             SafetyConfig(**bad).validate()
     SafetyConfig(speed_gain=1.3, min_speed=0.5).validate()
+
+
+def test_deadman_held():
+    from rl_policy.safety import deadman_held
+
+    assert deadman_held(-1, [], math.inf, 0.5)  # off
+    rb = [0, 0, 0, 0, 0, 1, 0]
+    assert deadman_held(5, rb, 0.05, 0.5)
+    assert not deadman_held(5, [0] * 7, 0.05, 0.5)  # released
+    assert not deadman_held(5, rb, 0.8, 0.5)  # stale /joy counts as released
+    assert not deadman_held(5, [], math.inf, 0.5)  # no joystick yet
+    assert not deadman_held(9, rb, 0.05, 0.5)  # button index past the controller's buttons

@@ -27,9 +27,11 @@ Then, in this order (each can only lower the speed, down to the brakes' 0):
                      brake (results note, D23). Use it on early car runs.
 4. Watchdog          scan older than 100 ms or odometry older than 200 ms
                      (or no valid scan / odometry / policy) -> speed 0
-5. Deadman           not in this node: the joystick (mux priority 100)
-                     overrides it, and the mux timeout stops the car if this
-                     node dies.
+5. Deadman           the joystick (mux priority 100) overrides this node, and
+                     the mux timeout stops the car if it dies. With
+                     deadman_button >= 0 the node also commands speed 0 unless
+                     that /joy button is held (and /joy is fresh): the policy
+                     only drives while the autonomous deadman (RB) is held.
 """
 
 import math
@@ -93,6 +95,14 @@ def map_speed(speed, cfg, v_cmd_max):
     if speed <= k:
         return float(speed)
     return float(k + (speed - k) * (cfg.max_speed - k) / (v_cmd_max - k))
+
+
+def deadman_held(button, buttons, joy_age, timeout):
+    """True when the deadman check passes: off (button < 0), or that button held on a /joy message
+    no older than ``timeout`` s (no /joy at all, or a stale one, counts as released)."""
+    if button < 0:
+        return True
+    return joy_age <= timeout and button < len(buttons) and bool(buttons[button])
 
 
 def shape_speed(speed, cfg, v_cmd_max):

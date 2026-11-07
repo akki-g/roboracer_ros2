@@ -9,6 +9,7 @@ yaml (default 1.5 m/s). scale_speed:=true maps the policy's 0-8 m/s onto
 (default 0.7), faster requests compressed toward the cap. A bag of /scan, odom, /drive and the debug topic is
 recorded when record:=true. speed_gain:=1.1 multiplies the policy's speed request;
 min_speed:=0.5 raises moving requests below 0.5 m/s to 0.5 (the motor can't crawl); both off by default.
+On the car the node drives only while joystick button deadman_button (5 = RB) is held.
 """
 
 import os
@@ -35,6 +36,9 @@ def _nodes(context):
         value = LaunchConfiguration(name).perform(context)
         if value:
             overrides[name] = float(value)
+    deadman = LaunchConfiguration('deadman_button').perform(context)
+    if deadman:
+        overrides['deadman_button'] = int(deadman)
     for name in ('ttc_brake', 'scale_speed'):
         value = LaunchConfiguration(name).perform(context)
         if value:
@@ -67,6 +71,8 @@ def generate_launch_description():
                                                                          'request (yaml: 1.0)'),
         DeclareLaunchArgument('min_speed', default_value='', description='m/s floor for moving requests '
                                                                         '(yaml: 0.0 = off)'),
+        DeclareLaunchArgument('deadman_button', default_value='', description='joy button that must be held '
+                                                                             'for the policy to drive (car yaml: 5 = RB; -1 off)'),
         DeclareLaunchArgument('record', default_value='false'),
         OpaqueFunction(function=_nodes),
     ])
