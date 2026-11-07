@@ -33,7 +33,8 @@ from std_msgs.msg import String
 
 from . import obs as ob
 from .numpy_policy import NumpyPolicy
-from .safety import DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, deadman_held, min_ttc, shape_speed
+from .safety import (DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, deadman_held, floor_speed, min_ttc,
+                     request_speed)
 
 # Training ends an episode after 2 s below 0.2 m/s; the node mirrors that by
 # resetting the stack, previous action and recurrent state (a fresh episode),
@@ -73,6 +74,7 @@ class PolicyNode(Node):
         self.declare_parameter("scale_knee", 0.7)  # scale_speed: unchanged below this fraction of max_speed
         self.declare_parameter("speed_gain", 1.0)  # multiplies the policy's speed request
         self.declare_parameter("min_speed", 0.0)  # m/s: floor for moving requests (0 = off)
+        self.declare_parameter("speed_smoothing", 1.0)  # fraction of the way to a new speed request per tick (1 = off)
         self.declare_parameter("scan_timeout", 0.1)
         self.declare_parameter("odom_timeout", 0.2)
         self.declare_parameter("enabled", True)
@@ -125,6 +127,7 @@ class PolicyNode(Node):
         self.forward_ms = deque(maxlen=500)  # policy forward-pass times, for the debug topic
         self.stopped_ticks = 0
         self.stall_resets = 0
+        self.speed_request = 0.0  # speed_smoothing state: the previous smoothed request
         self.deadman_button = int(self.get_parameter("deadman_button").value)
         self.joy_timeout = float(self.get_parameter("joy_timeout").value)
         self.joy = None  # (receive time, buttons)
@@ -143,6 +146,7 @@ class PolicyNode(Node):
             f"policy_node: {rate:.0f} Hz, max_speed {self.safety.max_speed} m/s "
             f"({'scaled' if self.safety.scale_speed else 'clamped'}), "
             f"speed gain {self.safety.speed_gain:g}, min speed {self.safety.min_speed:g} m/s, "
+            f"speed smoothing {self.safety.speed_smoothing:g}, "
             f"scan {self.get_parameter('scan_topic').value}, odom {self.get_parameter('odom_topic').value}, "
             f"drive {self.get_parameter('drive_topic').value}")
 
@@ -159,13 +163,15 @@ class PolicyNode(Node):
             scale_knee=float(get("scale_knee")),
             speed_gain=float(get("speed_gain")),
             min_speed=float(get("min_speed")),
+            speed_smoothing=float(get("speed_smoothing")),
             scan_timeout=float(get("scan_timeout")),
             odom_timeout=float(get("odom_timeout")),
         )
 
     def _on_set_parameters(self, params):
         names = ("max_speed", "steer_limit", "ttc_threshold", "ttc_half_angle_deg", "ttc_brake",
-                 "scale_speed", "scale_knee", "speed_gain", "min_speed", "scan_timeout", "odom_timeout")
+                 "scale_speed", "scale_knee", "speed_gain", "min_speed", "speed_smoothing", "scan_timeout",
+                 "odom_timeout")
         current = {n: self.get_parameter(n).value for n in names}
         enabled = self.enabled
         for p in params:
@@ -284,6 +290,7 @@ class PolicyNode(Node):
                 self.stack = ob.init_stack(scan_norm, self.frame_stack)
                 self.prev_action = ob.reset_action()
                 self.policy.reset()  # recurrent policies: start-up, watchdog recovery, enabled toggled on
+                self.speed_request = 0.0  # the car starts from rest
                 self.active = True
                 if not stall_reset:
                     self.get_logger().info("policy active: frame stack, previous action and recurrent state reset")
@@ -295,7 +302,9 @@ class PolicyNode(Node):
             self.forward_ms.append((time.perf_counter() - t0) * 1e3)
             speed_cmd, steer_cmd = ob.action_to_command(raw_action, self.v_cmd_max, self.steer_max)
             policy_speed = float(speed_cmd)
-            speed_cmd = shape_speed(policy_speed, self.safety, self.v_cmd_max)  # gain, scale_speed, min_speed
+            raw_request = request_speed(policy_speed, self.safety, self.v_cmd_max)  # gain, scale_speed
+            self.speed_request = request_speed(policy_speed, self.safety, self.v_cmd_max, self.speed_request)  # + smoothing
+            speed_cmd = floor_speed(self.speed_request, self.safety, raw_request)  # + min_speed
         elif self.active:
             self.active = False
             self.get_logger().warn(

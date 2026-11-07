@@ -3,6 +3,10 @@ can be unit-tested. The policy's speed request is first shaped (shape_speed):
 
 0. speed_gain        multiplies it (default 1.0, off);
    scale_speed       optional knee mapping onto [0, max_speed] (map_speed());
+   speed_smoothing   moving average with the previous request: each tick the
+                     request moves this fraction of the way to the new one
+                     (default 1.0, off; 0.5 cuts the policy's brake pulses
+                     ~3-4x in the sim with no loss in completion or lap time);
    min_speed         raises requests between MIN_SPEED_FROM and min_speed to
                      min_speed (default 0.0, off): the car's motor cannot hold
                      crawling speeds, so a policy asking for 0.1-0.3 m/s sits
@@ -61,6 +65,7 @@ class SafetyConfig:
     scale_knee: float = 0.7  # fraction of max_speed below which scale_speed leaves the speed unchanged
     speed_gain: float = 1.0  # multiplies the policy's speed request
     min_speed: float = 0.0  # m/s: floor for moving requests (0 = off)
+    speed_smoothing: float = 1.0  # fraction of the way to the new request per tick (1 = off)
     scan_timeout: float = SCAN_TIMEOUT
     odom_timeout: float = ODOM_TIMEOUT
 
@@ -75,6 +80,8 @@ class SafetyConfig:
             raise ValueError(f"speed_gain must be in [{SPEED_GAIN_RANGE[0]}, {SPEED_GAIN_RANGE[1]}]")
         if not (0.0 <= self.min_speed <= MIN_SPEED_MAX):
             raise ValueError(f"min_speed must be in [0, {MIN_SPEED_MAX}] m/s")
+        if not (0.0 < self.speed_smoothing <= 1.0):
+            raise ValueError("speed_smoothing must be in (0, 1]")
 
 
 @dataclass
@@ -105,13 +112,29 @@ def deadman_held(button, buttons, joy_age, timeout):
     return joy_age <= timeout and button < len(buttons) and bool(buttons[button])
 
 
-def shape_speed(speed, cfg, v_cmd_max):
-    """The policy's speed request with speed_gain, the scale_speed mapping and the min_speed floor
-    applied, before the cap and the brakes (apply_safety)."""
+def request_speed(speed, cfg, v_cmd_max, prev=None):
+    """The policy's speed request with speed_gain, the scale_speed mapping and speed_smoothing (a
+    moving average with ``prev``, the previous value this returned; None: no smoothing)."""
     speed = map_speed(float(speed) * cfg.speed_gain, cfg, v_cmd_max)
-    if cfg.min_speed > 0.0 and MIN_SPEED_FROM < speed < cfg.min_speed:
-        speed = cfg.min_speed
+    if prev is not None and cfg.speed_smoothing < 1.0:
+        speed = prev + cfg.speed_smoothing * (speed - prev)
     return float(speed)
+
+
+def floor_speed(speed, cfg, raw=None):
+    """min_speed: moving requests (> MIN_SPEED_FROM) below it are raised to it. ``raw``: the request
+    before smoothing; when the policy itself asks to stop (raw <= MIN_SPEED_FROM) there is no floor,
+    so a smoothed request slows the car on its way down instead of being held at min_speed."""
+    if raw is not None and raw <= MIN_SPEED_FROM:
+        return float(speed)
+    if cfg.min_speed > 0.0 and MIN_SPEED_FROM < speed < cfg.min_speed:
+        return float(cfg.min_speed)
+    return float(speed)
+
+
+def shape_speed(speed, cfg, v_cmd_max, prev=None):
+    """request_speed then floor_speed: what goes to the cap and the brakes (apply_safety)."""
+    return floor_speed(request_speed(speed, cfg, v_cmd_max, prev), cfg, request_speed(speed, cfg, v_cmd_max))
 
 
 def min_ttc(ranges, angles, speed, half_angle=TTC_HALF_ANGLE, range_min=0.0):

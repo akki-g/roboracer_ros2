@@ -32,7 +32,7 @@ def _nodes(context):
     max_speed = LaunchConfiguration('max_speed').perform(context)
     if max_speed:
         overrides['max_speed'] = float(max_speed)
-    for name in ('scale_knee', 'speed_gain', 'min_speed'):
+    for name in ('scale_knee', 'speed_gain', 'min_speed', 'speed_smoothing'):
         value = LaunchConfiguration(name).perform(context)
         if value:
             overrides[name] = float(value)
@@ -71,6 +71,8 @@ def generate_launch_description():
                                                                          'request (yaml: 1.0)'),
         DeclareLaunchArgument('min_speed', default_value='', description='m/s floor for moving requests '
                                                                         '(yaml: 0.0 = off)'),
+        DeclareLaunchArgument('speed_smoothing', default_value='', description='fraction of the way to a new '
+                                                                              'speed request per tick (yaml: 1.0 = off; 0.5 smooths the throttle)'),
         DeclareLaunchArgument('deadman_button', default_value='', description='joy button that must be held '
                                                                              'for the policy to drive (car yaml: 5 = RB; -1 off)'),
         DeclareLaunchArgument('record', default_value='false'),

@@ -15,6 +15,7 @@ policy_node:
     scale_knee: 0.7
     speed_gain: 1.0         # multiplies the policy's speed request
     min_speed: 0.0          # m/s floor for moving requests (0 = off; ~0.5 gets the car out of crawls)
+    speed_smoothing: 1.0    # fraction of the way to a new speed request per tick (1 = off; 0.5 smooths stop-and-go)
     deadman_button: -1        # no joystick in the sim
     scan_timeout: 0.1
     odom_timeout: 0.2

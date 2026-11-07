@@ -178,3 +178,19 @@ def test_deadman_held():
     assert not deadman_held(5, rb, 0.8, 0.5)  # stale /joy counts as released
     assert not deadman_held(5, [], math.inf, 0.5)  # no joystick yet
     assert not deadman_held(9, rb, 0.05, 0.5)  # button index past the controller's buttons
+
+
+def test_speed_smoothing():
+    from rl_policy.safety import request_speed, shape_speed
+
+    cfg = SafetyConfig(max_speed=10.0, speed_smoothing=0.5)
+    assert request_speed(4.0, cfg, 8.0) == 4.0  # no previous request: unchanged
+    assert request_speed(0.0, cfg, 8.0, prev=4.0) == 2.0  # a brake pulse is halved
+    assert request_speed(4.0, cfg, 8.0, prev=2.0) == 3.0
+    off = SafetyConfig(max_speed=10.0)
+    assert request_speed(0.0, off, 8.0, prev=4.0) == 0.0  # off by default
+    floor = SafetyConfig(max_speed=10.0, speed_smoothing=0.5, min_speed=0.5)
+    assert shape_speed(0.0, floor, 8.0, prev=0.4) == pytest.approx(0.2)  # the policy stops: no floor, the average slows
+    assert shape_speed(0.4, floor, 8.0, prev=0.2) == 0.5
+    with pytest.raises(ValueError):
+        SafetyConfig(speed_smoothing=0.0).validate()
