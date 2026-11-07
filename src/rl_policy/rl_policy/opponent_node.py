@@ -13,6 +13,7 @@ import time
 import rclpy
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
+from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 
 from .opponent_pursuit import SpeedSchedule, Track, command, parse_speed
@@ -22,14 +23,16 @@ class OpponentDriver(Node):
     def __init__(self):
         super().__init__("opponent_driver")
         self.declare_parameter("centerline", "")
-        self.declare_parameter("speed", "1.0")
-        self.declare_parameter("period", 6.0)
+        # speed:=1.0 arrives as a double, speed:=1.0-4.0 as a string, period:=6 as an integer
+        anytype = ParameterDescriptor(dynamic_typing=True)
+        self.declare_parameter("speed", "1.0", anytype)
+        self.declare_parameter("period", 6.0, anytype)
         self.declare_parameter("a_lat", 4.0)
         self.declare_parameter("seed", 0)
         self.declare_parameter("odom_topic", "/opp_racecar/odom")
         self.declare_parameter("drive_topic", "/opp_drive")
         self.track = Track.from_csv(self.get_parameter("centerline").value)
-        lo, hi = parse_speed(self.get_parameter("speed").value)
+        lo, hi = parse_speed(str(self.get_parameter("speed").value))
         self.schedule = SpeedSchedule(lo, hi, float(self.get_parameter("period").value),
                                       int(self.get_parameter("seed").value))
         self.a_lat = float(self.get_parameter("a_lat").value)

@@ -95,9 +95,17 @@ PIDS+=($!)
 sleep 4
 grep -E "loaded|resampling|refus|error" "$LOG_DIR/policy.log" | sed 's/^/  /' | cut -c1-180 || true
 if [ -n "$OPP_SPEED" ]; then
-  setsid ros2 run rl_policy opponent_driver --ros-args -p centerline:="$CENTERLINE" -p speed:="$OPP_SPEED" \
+  # with two cars the sim only steps once both have sent a drive command: no opponent, no motion
+  setsid ros2 run rl_policy opponent_driver --ros-args -p centerline:="$CENTERLINE" -p speed:="'$OPP_SPEED'" \
     -p period:="${OPP_PERIOD:-6.0}" > "$LOG_DIR/opponent.log" 2>&1 &
-  PIDS+=($!)
+  OPP_PID=$!
+  PIDS+=($OPP_PID)
+  sleep 3
+  if ! kill -0 "$OPP_PID" 2>/dev/null; then
+    echo "the opponent driver stopped (the sim cannot step without it):" >&2
+    tail -15 "$LOG_DIR/opponent.log" >&2
+    exit 1
+  fi
   echo "opponent: $OPP_SPEED m/s, starting ${OPP_GAP:-4.0} m ahead   log: $LOG_DIR/opponent.log"
 fi
 
