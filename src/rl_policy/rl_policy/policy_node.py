@@ -8,8 +8,9 @@ navigation priority (10); the joystick (priority 100) always wins and the
 mux timeout stops the car if this node dies.
 
 The published (post-safety) command becomes the next observation's previous
-action; with scale_speed its speed is expressed before the scale, so the policy
-sees its own request (as in training) unless a safety rule changed it. The frame stack and previous action reset whenever the node
+action, also with scale_speed: the previous action then agrees with the measured
+speed (feeding back the unscaled request paired an 8 m/s request with a ~3 m/s
+speed on every tick, which the policy never saw in training, and the car crashed). The frame stack and previous action reset whenever the node
 (re)activates: at start-up, after any watchdog stop, and when the
 ``enabled`` parameter is switched back on.
 """
@@ -291,7 +292,7 @@ class PolicyNode(Node):
         self.drive_pub.publish(msg)
 
         if self.active:
-            self.prev_action = ob.command_to_action(result.speed / scale, result.steer, self.v_cmd_max, self.steer_max)
+            self.prev_action = ob.command_to_action(result.speed, result.steer, self.v_cmd_max, self.steer_max)
 
         debug = {
             "t": now,
