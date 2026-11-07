@@ -36,6 +36,17 @@ if [ -n "$GYM_SRC" ] && ! [ "$SHARE/config/sim.yaml" -ef "$GYM_SRC/config/sim.ya
   cp "$SHARE/config/sim.yaml" "$GYM_SRC/config/sim.yaml"
 fi
 
+# RViz layout: upstream's draws only the ego car; with two cars use sim/gym_bridge_two_cars.rviz,
+# which also draws the opponent (the original is kept as gym_bridge.rviz.one_car and put back
+# for one-car configs)
+RVIZ="$SHARE/launch/gym_bridge.rviz"
+if [ -f "$RVIZ" ] && [ ! -f "$RVIZ.one_car" ]; then cp "$RVIZ" "$RVIZ.one_car"; fi
+if grep -q "^ *num_agent: *2" "$SHARE/config/sim.yaml"; then
+  cp --remove-destination "$WS/sim/gym_bridge_two_cars.rviz" "$RVIZ"
+elif [ -f "$RVIZ.one_car" ]; then
+  cp --remove-destination "$RVIZ.one_car" "$RVIZ"
+fi
+
 MAP="$(sed -n "s/^ *map_path: *['\"]\{0,1\}\([^'\"]*\)['\"]\{0,1\}.*/\1/p" "$SHARE/config/sim.yaml" | head -1)"
 if [ ! -f "$MAP.yaml" ]; then
   echo "map not found: $MAP.yaml (from $CONFIG; set GYM_ROS_SRC if the sim package's source is elsewhere)" >&2
