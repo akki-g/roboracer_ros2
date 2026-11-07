@@ -10,8 +10,9 @@ policy_node:
     ttc_threshold: 0.5
     ttc_half_angle_deg: 0.0
     ttc_brake: false        # off in the sim: training has no brake (results note, D23)
-    scale_speed: false      # true: policy's 0-8 m/s scaled onto 0..max_speed (keeps its slow-downs). The first
-                            # version crashed (fed back the unscaled request); now feeds back the scaled command
+    scale_speed: false      # true: policy's 0-8 m/s mapped onto 0..max_speed: unchanged below scale_knee x max_speed,
+                            # faster requests compressed toward the cap (feeds back the mapped command)
+    scale_knee: 0.7
     scan_timeout: 0.1
     odom_timeout: 0.2
     # f1tenth_gym's LiDAR is fixed at 1080 beams over 4.7 rad (the bridge's

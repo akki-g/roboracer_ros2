@@ -119,23 +119,18 @@ def test_executed_action_round_trip():
     np.testing.assert_allclose(ob.command_to_action(0.0, 0.0), ob.RESET_ACTION)
 
 
-def test_speed_scale():
-    from rl_policy.safety import speed_scale
+def test_map_speed_knee():
+    from rl_policy.safety import map_speed
 
-    cfg = SafetyConfig(max_speed=3.0, scale_speed=True)
-    s = speed_scale(cfg, 8.0)
-    assert s == pytest.approx(3.0 / 8.0)
-    # the policy's whole range lands inside the cap, in proportion: the clamp never fires
-    for v in (0.0, 2.0, 5.0, 8.0):
-        r = apply_safety(v * s, 0.0, cfg, **FRESH)
-        assert "speed_cap" not in r.overrides and r.speed == pytest.approx(v * 3.0 / 8.0)
-    # previous action, as the node computes it: the published (scaled) command, which agrees with
-    # the measured speed
-    r = apply_safety(6.0 * s, 0.1, cfg, **FRESH)
-    np.testing.assert_allclose(ob.command_to_action(r.speed, r.steer, 8.0), ob.command_to_action(6.0 * 3.0 / 8.0, 0.1, 8.0))
-    # a safety stop still shows as a stop
-    r = apply_safety(6.0 * s, 0.1, cfg, scan_age=0.5, odom_age=0.02, ttc=math.inf)
-    assert r.speed == 0.0 and ob.command_to_action(r.speed, r.steer, 8.0)[0] == -1.0
-    assert speed_scale(SafetyConfig(max_speed=3.0), 8.0) == 1.0  # off: clamp
-    assert speed_scale(SafetyConfig(max_speed=10.0, scale_speed=True), 8.0) == 1.0  # cap above the range
-    assert speed_scale(SafetyConfig(max_speed=0.0, scale_speed=True), 8.0) == 1.0  # zero cap: clamp to 0
+    cfg = SafetyConfig(max_speed=3.0, scale_speed=True, scale_knee=0.7)  # knee 2.1 m/s
+    for v, exp in ((0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (2.1, 2.1), (8.0, 3.0)):
+        assert map_speed(v, cfg, 8.0) == pytest.approx(exp)
+    assert map_speed(5.0, cfg, 8.0) == pytest.approx(2.1 + 2.9 * 0.9 / 5.9)
+    vs = [map_speed(v, cfg, 8.0) for v in np.linspace(0, 8, 81)]
+    assert np.all(np.diff(vs) >= 0) and max(vs) == pytest.approx(3.0)  # monotone, reaches the cap
+    for v in np.linspace(0, 8, 17):  # never over the cap: the clamp never fires
+        r = apply_safety(map_speed(v, cfg, 8.0), 0.0, cfg, **FRESH)
+        assert "speed_cap" not in r.overrides
+    assert map_speed(5.0, SafetyConfig(max_speed=3.0), 8.0) == 5.0  # off: unchanged (then clamped)
+    assert map_speed(5.0, SafetyConfig(max_speed=10.0, scale_speed=True), 8.0) == 5.0  # cap above the range
+    assert map_speed(4.0, SafetyConfig(max_speed=3.0, scale_speed=True, scale_knee=0.0), 8.0) == pytest.approx(1.5)  # linear

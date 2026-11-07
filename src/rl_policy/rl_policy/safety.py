@@ -2,9 +2,11 @@
 can be unit-tested. Applied after the policy, in this order:
 
 1. Speed cap         clamp the speed command to max_speed (default 1.5 m/s).
-                     With scale_speed, the node first scales the policy's speed
-                     range [0, v_cmd_max] onto [0, max_speed] (speed_scale()), so
-                     the policy's slow-downs survive a low cap; the clamp stays
+                     With scale_speed, the node first maps the policy's speed
+                     onto [0, max_speed] (map_speed()): unchanged below a knee
+                     (scale_knee x max_speed), the rest of [0, v_cmd_max]
+                     compressed above it, so corner speeds stay as asked and
+                     only fast requests ease toward the cap; the clamp stays
                      as a backstop.
 2. Steering clamp    +-steer_limit (0.4189 rad)
 3. Emergency brake   time-to-collision over the beams within +-30 deg of
@@ -41,6 +43,7 @@ class SafetyConfig:
     ttc_half_angle: float = TTC_HALF_ANGLE
     ttc_brake: bool = True
     scale_speed: bool = False
+    scale_knee: float = 0.7  # fraction of max_speed below which scale_speed leaves the speed unchanged
     scan_timeout: float = SCAN_TIMEOUT
     odom_timeout: float = ODOM_TIMEOUT
 
@@ -61,13 +64,16 @@ class SafetyResult:
     min_ttc: float = math.inf
 
 
-def speed_scale(cfg, v_cmd_max):
-    """Factor that maps the policy's speed range [0, v_cmd_max] onto [0, max_speed]:
-    max_speed / v_cmd_max with scale_speed on and a cap below the policy's range,
-    else 1.0 (the cap clamps)."""
-    if cfg.scale_speed and 0.0 < cfg.max_speed < v_cmd_max:
-        return cfg.max_speed / v_cmd_max
-    return 1.0
+def map_speed(speed, cfg, v_cmd_max):
+    """The policy's speed request mapped onto [0, max_speed] (scale_speed): unchanged up to the
+    knee k = scale_knee * max_speed, then [k, v_cmd_max] compressed linearly onto [k, max_speed].
+    Identity with scale_speed off or a cap at or above the policy's range (the cap then clamps)."""
+    if not (cfg.scale_speed and 0.0 < cfg.max_speed < v_cmd_max):
+        return float(speed)
+    k = min(max(cfg.scale_knee, 0.0), 1.0) * cfg.max_speed
+    if speed <= k:
+        return float(speed)
+    return float(k + (speed - k) * (cfg.max_speed - k) / (v_cmd_max - k))
 
 
 def min_ttc(ranges, angles, speed, half_angle=TTC_HALF_ANGLE, range_min=0.0):

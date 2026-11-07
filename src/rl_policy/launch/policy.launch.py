@@ -5,7 +5,8 @@
 
 mode selects config/policy_<mode>.yaml (topics); max_speed overrides the
 yaml (default 1.5 m/s). scale_speed:=true maps the policy's 0-8 m/s onto
-0..max_speed instead of clamping at max_speed. A bag of /scan, odom, /drive and the debug topic is
+0..max_speed instead of clamping: unchanged below scale_knee x max_speed
+(default 0.7), faster requests compressed toward the cap. A bag of /scan, odom, /drive and the debug topic is
 recorded when record:=true.
 """
 
@@ -29,6 +30,9 @@ def _nodes(context):
     max_speed = LaunchConfiguration('max_speed').perform(context)
     if max_speed:
         overrides['max_speed'] = float(max_speed)
+    scale_knee = LaunchConfiguration('scale_knee').perform(context)
+    if scale_knee:
+        overrides['scale_knee'] = float(scale_knee)
     for name in ('ttc_brake', 'scale_speed'):
         value = LaunchConfiguration(name).perform(context)
         if value:
@@ -54,6 +58,8 @@ def generate_launch_description():
         DeclareLaunchArgument('scale_speed', default_value='',
                               description='true: scale the policy speed range onto 0..max_speed instead of clamping; '
                                           'empty keeps the yaml value'),
+        DeclareLaunchArgument('scale_knee', default_value='', description='scale_speed: fraction of max_speed '
+                                                                         'below which speed is unchanged (yaml: 0.7)'),
         DeclareLaunchArgument('record', default_value='false'),
         OpaqueFunction(function=_nodes),
     ])
