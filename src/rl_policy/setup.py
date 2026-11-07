@@ -27,6 +27,7 @@ setup(
             'policy_node = rl_policy.policy_node:main',
             'stage0_monitor = rl_policy.stage0_monitor:main',
             'bench_policy = rl_policy.bench_policy:main',
+            'opponent_driver = rl_policy.opponent_node:main',
         ],
     },
 )

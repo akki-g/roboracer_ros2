@@ -7,6 +7,12 @@
 #   MAP=EvalDuct3012 tools/sim_gru.sh        # a never-trained map: sim/sim_rl_<MAP>.yaml (tools/sim_gru.sh --maps lists them)
 #   SIM_CONFIG=sim/sim.yaml tools/sim_gru.sh # any sim config (its map needs a *_centerline.csv for the monitor)
 #
+# The last race's track: MAP=LastRace2 (LastRace2Rev the other way round), with parked cars
+# MAP=LastRace2Obs (LastRace2RevObs). An opponent car (a second sim car following the centerline):
+#   MAP=LastRace2 OPP_SPEED=1.0 tools/sim_gru.sh gru1025_opp_u0750.npz       # at 1 m/s
+#   MAP=LastRace2 OPP_SPEED=1.0-4.0 tools/sim_gru.sh gru1025_opp_u0750.npz   # a new speed in 1-4 m/s every 6 s
+#   OPP_GAP=4.0 (m ahead of the ego at the start; negative: behind), OPP_PERIOD=6.0 (s between speed changes)
+#
 # Needs: ROS 2 Humble and the sim workspace sourced, and `colcon build --packages-select rl_policy`
 # done in this repo (the script builds it if the install is missing). Ctrl-C stops everything.
 set -eo pipefail
@@ -53,6 +59,26 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 LOG_DIR="${TMPDIR:-/tmp}/sim_gru_logs"; mkdir -p "$LOG_DIR"
+
+OPP_SPEED="${OPP_SPEED:-}"
+if [ -n "$OPP_SPEED" ]; then
+  # the same sim config with a second car OPP_GAP m along the centerline from the ego's start
+  [ -f "$CENTERLINE" ] || { echo "OPP_SPEED needs the map's centerline: $CENTERLINE" >&2; exit 1; }
+  OPP_CONFIG="$LOG_DIR/sim_two_cars.yaml"
+  python3 - "$SIM_CONFIG" "$CENTERLINE" "${OPP_GAP:-4.0}" "$OPP_CONFIG" <<'PY'
+import re, sys
+sys.path.insert(0, "src/rl_policy")
+from rl_policy.opponent_pursuit import Track, parse_speed
+cfg, cl, gap, out = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
+x, y, yaw = Track.from_csv(cl).pose_ahead(gap)
+t = open(cfg).read()
+t = re.sub(r"num_agent: *[0-9]+", "num_agent: 2", t)
+for key, value in (("sx1", x), ("sy1", y), ("stheta1", yaw)):
+    t = re.sub(rf"{key}: *[-0-9.]+", f"{key}: {value:.4f}", t)
+open(out, "w").write(t)
+PY
+  SIM_CONFIG="$OPP_CONFIG"
+fi
 echo "sim: $SIM_CONFIG   policy: $POLICY_PATH   logs: $LOG_DIR"
 setsid bash ./start_sim.sh "$SIM_CONFIG" > "$LOG_DIR/sim.log" 2>&1 &
 PIDS+=($!)
@@ -68,6 +94,12 @@ setsid ros2 launch rl_policy policy.launch.py mode:=sim policy_path:="$POLICY_PA
 PIDS+=($!)
 sleep 4
 grep -E "loaded|resampling|refus|error" "$LOG_DIR/policy.log" | sed 's/^/  /' | cut -c1-180 || true
+if [ -n "$OPP_SPEED" ]; then
+  setsid ros2 run rl_policy opponent_driver --ros-args -p centerline:="$CENTERLINE" -p speed:="$OPP_SPEED" \
+    -p period:="${OPP_PERIOD:-6.0}" > "$LOG_DIR/opponent.log" 2>&1 &
+  PIDS+=($!)
+  echo "opponent: $OPP_SPEED m/s, starting ${OPP_GAP:-4.0} m ahead   log: $LOG_DIR/opponent.log"
+fi
 
 if [ -n "$MONITOR_S" ]; then
   if [ -f "$CENTERLINE" ]; then

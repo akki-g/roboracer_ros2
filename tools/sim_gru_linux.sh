@@ -8,6 +8,9 @@
 #   tools/sim_gru_linux.sh mlp3_u02050.npz 90                  # another policy; lap monitor for 90 s, then stop
 #   MAP=EvalDuct3012 tools/sim_gru_linux.sh gru_u02050.npz 90  # a map never used in training
 #   tools/sim_gru_linux.sh --maps                              # list the maps
+#   MAP=LastRace2 tools/sim_gru_linux.sh gru1025_solo_u0950.npz              # the last race's track
+#   MAP=LastRace2Obs tools/sim_gru_linux.sh gru1025_obs_u0750.npz            # ... with parked cars
+#   MAP=LastRace2 OPP_SPEED=1.0-4.0 tools/sim_gru_linux.sh gru1025_opp_u0750.npz  # ... with an opponent car
 #
 # Needs Docker with the compose plugin. Linux: Docker Engine, with your user in the docker group.
 # Windows: Docker Desktop (WSL 2 engine) with WSL integration on for this distro.
@@ -36,7 +39,8 @@ if ! err=$(docker info 2>&1 >/dev/null); then
   die "the Docker daemon is not running: sudo systemctl start docker"
 fi
 
-EXEC_ENV=(-e "MAP=${MAP:-}" -e "SIM_CONFIG=${SIM_CONFIG:-}")
+EXEC_ENV=(-e "MAP=${MAP:-}" -e "SIM_CONFIG=${SIM_CONFIG:-}" -e "OPP_SPEED=${OPP_SPEED:-}" -e "OPP_GAP=${OPP_GAP:-}"
+          -e "OPP_PERIOD=${OPP_PERIOD:-}")
 if [ -n "$WSL" ]; then
   [ -S /mnt/wslg/.X11-unix/X0 ] ||
     die "WSLg is missing (no /mnt/wslg/.X11-unix/X0). It needs Windows 11, or Windows 10 with WSL from the Microsoft Store: in PowerShell run  wsl --update  then  wsl --shutdown, and try again"
