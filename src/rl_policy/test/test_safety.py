@@ -115,7 +115,7 @@ def test_order_brake_wins_over_cap():
 def test_executed_action_round_trip():
     """The node feeds the published command back as the previous action."""
     a = ob.command_to_action(1.5, 0.2)
-    assert a[0] == pytest.approx(2 * 1.5 / 8.0 - 1) and a[1] == pytest.approx(0.2 / 0.4189)
+    assert a[0] == pytest.approx(2 * 1.5 / 8.0 - 1) and a[1] == pytest.approx(0.2 / ob.S_MAX)
     np.testing.assert_allclose(ob.command_to_action(0.0, 0.0), ob.RESET_ACTION)
 
 

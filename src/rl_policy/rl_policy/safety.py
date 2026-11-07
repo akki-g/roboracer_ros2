@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 DEFAULT_MAX_SPEED = 1.5  # m/s; do not raise the default
-STEER_LIMIT = 0.4189  # rad
+STEER_LIMIT = 0.4422  # rad: the car's smaller full lock (servo end stop with gain -0.9, offset 0.552; was 0.4189)
 TTC_THRESHOLD = 0.5  # s
 TTC_HALF_ANGLE = math.radians(30.0)
 SCAN_TIMEOUT = 0.1  # s

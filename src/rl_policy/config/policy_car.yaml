@@ -6,7 +6,7 @@ policy_node:
     odom_topic: /odom
     drive_topic: /drive
     max_speed: 10.0          # m/s - default; raise only per the test protocol stage
-    steer_limit: 0.4189     # rad
+    steer_limit: 0.4422     # rad (servo end stop; models before phase 1d command at most 0.4189)
     ttc_threshold: 0.5      # s
     ttc_half_angle_deg: 0.0
     ttc_brake: true         # with a 0 deg cone only the centre beam (index 540) can brake

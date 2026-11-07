@@ -6,7 +6,7 @@ policy_node:
     odom_topic: /ego_racecar/odom
     drive_topic: /drive
     max_speed: 10.5
-    steer_limit: 0.4189
+    steer_limit: 0.4422
     ttc_threshold: 0.5
     ttc_half_angle_deg: 0.0
     ttc_brake: false        # off in the sim: training has no brake (results note, D23)
