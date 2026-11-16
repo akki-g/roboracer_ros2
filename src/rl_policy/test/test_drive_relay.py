@@ -17,9 +17,8 @@ def test_round_trip_and_bad_packets():
 
 def test_gate():
     cmd = (4.0, 0.3)
-    assert relay_command(cmd, 0.05, 0.3, True, 10.0, 0.4422) == (4.0, 0.3)
-    assert relay_command(cmd, 0.5, 0.3, True, 10.0, 0.4422) == (0.0, 0.0)  # stale: stop
-    assert relay_command(cmd, 0.05, 0.3, False, 10.0, 0.4422) == (0.0, 0.0)  # deadman released: stop
-    assert relay_command(None, 0.0, 0.3, True, 10.0, 0.4422) == (0.0, 0.0)  # nothing received yet
-    assert relay_command((12.0, 0.9), 0.05, 0.3, True, 10.0, 0.4422) == (10.0, 0.4422)  # clamped
-    assert relay_command((-1.0, -0.9), 0.05, 0.3, True, 10.0, 0.4422) == (0.0, -0.4422)
+    assert relay_command(cmd, 0.05, 0.3, 10.0, 0.4422) == (4.0, 0.3)
+    assert relay_command(cmd, 0.5, 0.3, 10.0, 0.4422) == (0.0, 0.0)  # stale: stop
+    assert relay_command(None, 0.0, 0.3, 10.0, 0.4422) == (0.0, 0.0)  # nothing received yet
+    assert relay_command((12.0, 0.9), 0.05, 0.3, 10.0, 0.4422) == (10.0, 0.4422)  # clamped
+    assert relay_command((-1.0, -0.9), 0.05, 0.3, 10.0, 0.4422) == (0.0, -0.4422)

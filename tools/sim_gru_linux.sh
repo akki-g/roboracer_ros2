@@ -11,7 +11,7 @@
 #   MAP=LastRace2 tools/sim_gru_linux.sh gru1025_solo_u0950.npz              # the last race's track
 #   MAP=LastRace2Obs tools/sim_gru_linux.sh gru1025_obs_u0750.npz            # ... with parked cars
 #   MAP=LastRace2 OPP_SPEED=1.0-4.0 tools/sim_gru_linux.sh gru1025_opp_u0750.npz  # ... with an opponent car
-#   POLICY_ARGS="speed_smoothing:=0.5 min_speed:=0.5" MAP=LastRace2 tools/sim_gru_linux.sh gru1025_obs_u0750.npz
+#   POLICY_ARGS="speed_smoothing:=0.5 speed_gain:=1.2" MAP=LastRace2 tools/sim_gru_linux.sh gru1025_obs_u0750.npz
 #   CAR_HOST=192.168.0.15 ... (also sends the commands to the car on a stand; see tools/sim_gru.sh)
 #
 # Needs Docker with the compose plugin. Linux: Docker Engine, with your user in the docker group.

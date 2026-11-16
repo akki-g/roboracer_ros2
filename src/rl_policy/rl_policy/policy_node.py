@@ -28,17 +28,16 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rcl_interfaces.msg import SetParametersResult
-from sensor_msgs.msg import Joy, LaserScan
+from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 
 from . import obs as ob
 from .numpy_policy import NumpyPolicy
-from .safety import (DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, deadman_held, floor_speed, min_ttc,
-                     request_speed)
+from .safety import DEFAULT_MAX_SPEED, STEER_LIMIT, SafetyConfig, apply_safety, min_ttc, request_speed
 
 # Training ends an episode after 2 s below 0.2 m/s; the node mirrors that by
 # resetting the stack, previous action and recurrent state (a fresh episode),
-# e.g. while the joystick holds the car before the autonomy deadman is pressed.
+# e.g. while the joystick holds the car still.
 STALL_SPEED = 0.2  # m/s
 STALL_TICKS = 50  # 2 s at 25 Hz
 SCAN_ANGLE_TOL = 0.01  # rad, on angle_min
@@ -73,15 +72,10 @@ class PolicyNode(Node):
         self.declare_parameter("scale_speed", False)
         self.declare_parameter("scale_knee", 0.7)  # scale_speed: unchanged below this fraction of max_speed
         self.declare_parameter("speed_gain", 1.0)  # multiplies the policy's speed request
-        self.declare_parameter("min_speed", 0.0)  # m/s: floor for moving requests (0 = off)
         self.declare_parameter("speed_smoothing", 1.0)  # fraction of the way to a new speed request per tick (1 = off)
         self.declare_parameter("scan_timeout", 0.1)
         self.declare_parameter("odom_timeout", 0.2)
         self.declare_parameter("enabled", True)
-        # >= 0: drive only while this /joy button is held (RB = 5, joy_teleop's autonomous deadman); -1: off
-        self.declare_parameter("deadman_button", -1)
-        self.declare_parameter("joy_topic", "/joy")
-        self.declare_parameter("joy_timeout", 0.5)  # s: an older /joy counts as released
         # Off on the car: anything but the UST-10LX's 1081 beams stops the car.
         # On in the ROS sim, whose LiDAR is fixed at 1080 beams over 4.7 rad:
         # take the nearest beam to each policy angle if within resample_tol_deg.
@@ -128,10 +122,6 @@ class PolicyNode(Node):
         self.stopped_ticks = 0
         self.stall_resets = 0
         self.speed_request = 0.0  # speed_smoothing state: the previous smoothed request
-        self.deadman_button = int(self.get_parameter("deadman_button").value)
-        self.joy_timeout = float(self.get_parameter("joy_timeout").value)
-        self.joy = None  # (receive time, buttons)
-        self.deadman_ok = self.deadman_button < 0
 
         self.drive_pub = self.create_publisher(
             AckermannDriveStamped, self.get_parameter("drive_topic").value, 10)
@@ -139,13 +129,11 @@ class PolicyNode(Node):
         self.create_subscription(LaserScan, self.get_parameter("scan_topic").value,
                                  self._on_scan, qos_profile_sensor_data)
         self.create_subscription(Odometry, self.get_parameter("odom_topic").value, self._on_odom, 10)
-        if self.deadman_button >= 0:
-            self.create_subscription(Joy, self.get_parameter("joy_topic").value, self._on_joy, 10)
         self.timer = self.create_timer(1.0 / rate, self._tick)
         self.get_logger().info(
             f"policy_node: {rate:.0f} Hz, max_speed {self.safety.max_speed} m/s "
             f"({'scaled' if self.safety.scale_speed else 'clamped'}), "
-            f"speed gain {self.safety.speed_gain:g}, min speed {self.safety.min_speed:g} m/s, "
+            f"speed gain {self.safety.speed_gain:g}, "
             f"speed smoothing {self.safety.speed_smoothing:g}, "
             f"scan {self.get_parameter('scan_topic').value}, odom {self.get_parameter('odom_topic').value}, "
             f"drive {self.get_parameter('drive_topic').value}")
@@ -162,7 +150,6 @@ class PolicyNode(Node):
             scale_speed=bool(get("scale_speed")),
             scale_knee=float(get("scale_knee")),
             speed_gain=float(get("speed_gain")),
-            min_speed=float(get("min_speed")),
             speed_smoothing=float(get("speed_smoothing")),
             scan_timeout=float(get("scan_timeout")),
             odom_timeout=float(get("odom_timeout")),
@@ -170,8 +157,7 @@ class PolicyNode(Node):
 
     def _on_set_parameters(self, params):
         names = ("max_speed", "steer_limit", "ttc_threshold", "ttc_half_angle_deg", "ttc_brake",
-                 "scale_speed", "scale_knee", "speed_gain", "min_speed", "speed_smoothing", "scan_timeout",
-                 "odom_timeout")
+                 "scale_speed", "scale_knee", "speed_gain", "speed_smoothing", "scan_timeout", "odom_timeout")
         current = {n: self.get_parameter(n).value for n in names}
         enabled = self.enabled
         for p in params:
@@ -244,9 +230,6 @@ class PolicyNode(Node):
         self.scan = (now, ranges, angles, float(msg.range_min))
         self.scan_ok = ok
 
-    def _on_joy(self, msg: Joy):
-        self.joy = (self.get_clock().now().nanoseconds * 1e-9, list(msg.buttons))
-
     def _on_odom(self, msg: Odometry):
         now = self.get_clock().now().nanoseconds * 1e-9
         self.odom = (now, float(msg.twist.twist.linear.x))
@@ -258,13 +241,7 @@ class PolicyNode(Node):
         odom_age = now - self.odom[0] if self.odom else math.inf
         speed_meas = self.odom[1] if self.odom else 0.0
         fresh = scan_age <= self.safety.scan_timeout and odom_age <= self.safety.odom_timeout
-        joy_age = now - self.joy[0] if self.joy else math.inf
-        deadman_ok = deadman_held(self.deadman_button, self.joy[1] if self.joy else [], joy_age, self.joy_timeout)
-        if deadman_ok != self.deadman_ok:
-            self.deadman_ok = deadman_ok
-            self.get_logger().info(f"deadman (button {self.deadman_button}) "
-                                   f"{'held: policy drives' if deadman_ok else 'released: speed 0'}")
-        usable = self.policy is not None and self.scan_ok and self.enabled and deadman_ok
+        usable = self.policy is not None and self.scan_ok and self.enabled
 
         raw_action = None
         speed_cmd, steer_cmd = 0.0, 0.0
@@ -302,14 +279,14 @@ class PolicyNode(Node):
             self.forward_ms.append((time.perf_counter() - t0) * 1e3)
             speed_cmd, steer_cmd = ob.action_to_command(raw_action, self.v_cmd_max, self.steer_max)
             policy_speed = float(speed_cmd)
-            raw_request = request_speed(policy_speed, self.safety, self.v_cmd_max)  # gain, scale_speed
-            self.speed_request = request_speed(policy_speed, self.safety, self.v_cmd_max, self.speed_request)  # + smoothing
-            speed_cmd = floor_speed(self.speed_request, self.safety, raw_request)  # + min_speed
+            # gain, scale_speed, smoothing
+            self.speed_request = request_speed(policy_speed, self.safety, self.v_cmd_max, self.speed_request)
+            speed_cmd = self.speed_request
         elif self.active:
             self.active = False
             self.get_logger().warn(
                 f"policy inactive (scan age {scan_age:.3f}s, odom age {odom_age:.3f}s, "
-                f"scan ok {self.scan_ok}, enabled {self.enabled}, deadman {self.deadman_ok}); commanding speed 0")
+                f"scan ok {self.scan_ok}, enabled {self.enabled}); commanding speed 0")
 
         result = apply_safety(speed_cmd, steer_cmd, self.safety, scan_age=scan_age, odom_age=odom_age,
                               ttc=ttc, valid=usable)
@@ -331,7 +308,6 @@ class PolicyNode(Node):
         debug = {
             "t": now,
             "active": self.active,
-            "deadman": self.deadman_ok,
             "speed_meas": speed_meas,
             "scan_age": None if math.isinf(scan_age) else round(scan_age, 4),
             "odom_age": None if math.isinf(odom_age) else round(odom_age, 4),

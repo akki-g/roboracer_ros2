@@ -12,7 +12,7 @@
 #   MAP=LastRace2 OPP_SPEED=1.0 tools/sim_gru.sh gru1025_opp_u0750.npz       # at 1 m/s
 #   MAP=LastRace2 OPP_SPEED=1.0-4.0 tools/sim_gru.sh gru1025_opp_u0750.npz   # a new speed in 1-4 m/s every 6 s
 #   OPP_GAP=4.0 (m ahead of the ego at the start; negative: behind), OPP_PERIOD=6.0 (s between speed changes)
-# POLICY_ARGS adds launch arguments to the policy node, e.g. POLICY_ARGS="speed_smoothing:=0.5 min_speed:=0.5".
+# POLICY_ARGS adds launch arguments to the policy node, e.g. POLICY_ARGS="speed_smoothing:=0.5 speed_gain:=1.2".
 # CAR_HOST=<car ip> also sends the sim policy's /drive to the real car over UDP (car ON A STAND, running
 #   ros2 run rl_policy drive_relay --ros-args -p mode:=receive  with its bringup and RB held).
 #

@@ -7,9 +7,7 @@ mode selects config/policy_<mode>.yaml (topics); max_speed overrides the
 yaml (default 1.5 m/s). scale_speed:=true maps the policy's 0-8 m/s onto
 0..max_speed instead of clamping: unchanged below scale_knee x max_speed
 (default 0.7), faster requests compressed toward the cap. A bag of /scan, odom, /drive and the debug topic is
-recorded when record:=true. speed_gain:=1.1 multiplies the policy's speed request;
-min_speed:=0.5 raises moving requests below 0.5 m/s to 0.5 (the motor can't crawl); both off by default.
-On the car the node drives only while joystick button deadman_button (5 = RB) is held.
+recorded when record:=true. speed_gain:=1.1 multiplies the policy's speed request (off by default).
 """
 
 import os
@@ -32,13 +30,10 @@ def _nodes(context):
     max_speed = LaunchConfiguration('max_speed').perform(context)
     if max_speed:
         overrides['max_speed'] = float(max_speed)
-    for name in ('scale_knee', 'speed_gain', 'min_speed', 'speed_smoothing'):
+    for name in ('scale_knee', 'speed_gain', 'speed_smoothing'):
         value = LaunchConfiguration(name).perform(context)
         if value:
             overrides[name] = float(value)
-    deadman = LaunchConfiguration('deadman_button').perform(context)
-    if deadman:
-        overrides['deadman_button'] = int(deadman)
     for name in ('ttc_brake', 'scale_speed'):
         value = LaunchConfiguration(name).perform(context)
         if value:
@@ -69,12 +64,8 @@ def generate_launch_description():
                                                                          'below which speed is unchanged (yaml: 0.7)'),
         DeclareLaunchArgument('speed_gain', default_value='', description='multiplies the policy speed '
                                                                          'request (yaml: 1.0)'),
-        DeclareLaunchArgument('min_speed', default_value='', description='m/s floor for moving requests '
-                                                                        '(yaml: 0.0 = off)'),
         DeclareLaunchArgument('speed_smoothing', default_value='', description='fraction of the way to a new '
                                                                               'speed request per tick (yaml: 1.0 = off; 0.5 smooths the throttle)'),
-        DeclareLaunchArgument('deadman_button', default_value='', description='joy button that must be held '
-                                                                             'for the policy to drive (car yaml: 5 = RB; -1 off)'),
         DeclareLaunchArgument('record', default_value='false'),
         OpaqueFunction(function=_nodes),
     ])

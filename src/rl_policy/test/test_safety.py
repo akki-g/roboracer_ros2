@@ -136,52 +136,27 @@ def test_map_speed_knee():
     assert map_speed(4.0, SafetyConfig(max_speed=3.0, scale_speed=True, scale_knee=0.0), 8.0) == pytest.approx(1.5)  # linear
 
 
-def test_speed_gain_and_min_speed():
-    from rl_policy.safety import MIN_SPEED_FROM, shape_speed
+def test_speed_gain():
+    from rl_policy.safety import request_speed
 
     off = SafetyConfig(max_speed=10.0)
-    assert shape_speed(3.0, off, 8.0) == 3.0 and shape_speed(0.2, off, 8.0) == 0.2  # both off by default
+    assert request_speed(3.0, off, 8.0) == 3.0 and request_speed(0.2, off, 8.0) == 0.2  # off by default
     gain = SafetyConfig(max_speed=10.0, speed_gain=1.2)
-    assert shape_speed(3.0, gain, 8.0) == pytest.approx(3.6)
-    floor = SafetyConfig(max_speed=10.0, min_speed=0.5)
-    assert shape_speed(0.2, floor, 8.0) == 0.5  # a crawl is lifted to the floor
-    assert shape_speed(0.0, floor, 8.0) == 0.0 and shape_speed(MIN_SPEED_FROM, floor, 8.0) == MIN_SPEED_FROM  # stop stays
-    assert shape_speed(2.0, floor, 8.0) == 2.0  # faster requests untouched
-    both = SafetyConfig(max_speed=4.0, speed_gain=1.5, min_speed=0.5)
-    r = apply_safety(shape_speed(3.0, both, 8.0), 0.0, both, scan_age=0.0, odom_age=0.0, ttc=math.inf)
+    assert request_speed(3.0, gain, 8.0) == pytest.approx(3.6)
+    capped = SafetyConfig(max_speed=4.0, speed_gain=1.5)
+    r = apply_safety(request_speed(3.0, capped, 8.0), 0.0, capped, scan_age=0.0, odom_age=0.0, ttc=math.inf)
     assert r.speed == 4.0 and "speed_cap" in r.overrides  # the cap still wins after the gain
 
 
-def test_min_speed_never_beats_the_brakes():
-    from rl_policy.safety import shape_speed
-
-    cfg = SafetyConfig(max_speed=10.0, min_speed=0.6, ttc_brake=True)
-    s = shape_speed(0.2, cfg, 8.0)
-    assert apply_safety(s, 0.0, cfg, scan_age=0.0, odom_age=0.0, ttc=0.1).speed == 0.0  # emergency brake
-    assert apply_safety(s, 0.0, cfg, scan_age=1.0, odom_age=0.0, ttc=math.inf).speed == 0.0  # watchdog
-
-
-def test_gain_and_floor_validation():
-    for bad in (dict(speed_gain=0.2), dict(speed_gain=3.0), dict(min_speed=-0.1), dict(min_speed=5.0)):
+def test_gain_validation():
+    for bad in (dict(speed_gain=0.2), dict(speed_gain=3.0)):
         with pytest.raises(ValueError):
             SafetyConfig(**bad).validate()
-    SafetyConfig(speed_gain=1.3, min_speed=0.5).validate()
-
-
-def test_deadman_held():
-    from rl_policy.safety import deadman_held
-
-    assert deadman_held(-1, [], math.inf, 0.5)  # off
-    rb = [0, 0, 0, 0, 0, 1, 0]
-    assert deadman_held(5, rb, 0.05, 0.5)
-    assert not deadman_held(5, [0] * 7, 0.05, 0.5)  # released
-    assert not deadman_held(5, rb, 0.8, 0.5)  # stale /joy counts as released
-    assert not deadman_held(5, [], math.inf, 0.5)  # no joystick yet
-    assert not deadman_held(9, rb, 0.05, 0.5)  # button index past the controller's buttons
+    SafetyConfig(speed_gain=1.3).validate()
 
 
 def test_speed_smoothing():
-    from rl_policy.safety import request_speed, shape_speed
+    from rl_policy.safety import request_speed
 
     cfg = SafetyConfig(max_speed=10.0, speed_smoothing=0.5)
     assert request_speed(4.0, cfg, 8.0) == 4.0  # no previous request: unchanged
@@ -189,8 +164,5 @@ def test_speed_smoothing():
     assert request_speed(4.0, cfg, 8.0, prev=2.0) == 3.0
     off = SafetyConfig(max_speed=10.0)
     assert request_speed(0.0, off, 8.0, prev=4.0) == 0.0  # off by default
-    floor = SafetyConfig(max_speed=10.0, speed_smoothing=0.5, min_speed=0.5)
-    assert shape_speed(0.0, floor, 8.0, prev=0.4) == pytest.approx(0.2)  # the policy stops: no floor, the average slows
-    assert shape_speed(0.4, floor, 8.0, prev=0.2) == 0.5
     with pytest.raises(ValueError):
         SafetyConfig(speed_smoothing=0.0).validate()

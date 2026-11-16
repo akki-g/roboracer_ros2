@@ -6,7 +6,7 @@ On the car, with the bringup (joystick, mux, VESC) running and the policy node N
     ros2 run rl_policy drive_relay --ros-args -p mode:=receive
 
 The receiver publishes the latest command on /drive (the mux's navigation input) only while it is fresh
-(timeout 0.3 s) and joystick button deadman_button (5 = RB) is held; otherwise speed 0, steering 0.
+(timeout 0.3 s); otherwise speed 0, steering 0.
 Speed is clamped to [0, max_speed], steering to +-STEER_LIMIT. tools/sim_gru.sh starts the sender when
 CAR_HOST is set. UDP rather than ROS discovery: VMware's NAT does not pass DDS multicast to the car.
 """
@@ -34,10 +34,9 @@ def decode(data):
     return seq, speed, steer
 
 
-def relay_command(last, age, timeout, deadman_ok, max_speed, steer_limit):
-    """(speed, steer) to publish: the last received (speed, steer) when fresh and the deadman is held,
-    clamped; otherwise a stop."""
-    if last is None or age > timeout or not deadman_ok:
+def relay_command(last, age, timeout, max_speed, steer_limit):
+    """(speed, steer) to publish: the last received (speed, steer) when fresh, clamped; otherwise a stop."""
+    if last is None or age > timeout:
         return 0.0, 0.0
     speed, steer = last
     return min(max(speed, 0.0), max_speed), min(max(steer, -steer_limit), steer_limit)
@@ -47,9 +46,8 @@ def main():
     import rclpy
     from ackermann_msgs.msg import AckermannDriveStamped
     from rclpy.node import Node
-    from sensor_msgs.msg import Joy
 
-    from .safety import STEER_LIMIT, deadman_held
+    from .safety import STEER_LIMIT
 
     class DriveRelay(Node):
         def __init__(self):
@@ -68,27 +66,19 @@ def main():
             elif self.mode == "receive":
                 self.timeout = float(self.declare_parameter("timeout", 0.3).value)
                 self.max_speed = float(self.declare_parameter("max_speed", 10.0).value)
-                self.deadman_button = int(self.declare_parameter("deadman_button", 5).value)
-                self.joy_timeout = float(self.declare_parameter("joy_timeout", 0.5).value)
                 self.sock.bind(("0.0.0.0", self.port))
                 self.sock.setblocking(False)
-                self.last, self.last_t, self.joy, self.packets = None, -math.inf, None, 0
+                self.last, self.last_t, self.packets = None, -math.inf, 0
                 self.pub = self.create_publisher(AckermannDriveStamped, topic, 10)
-                if self.deadman_button >= 0:
-                    self.create_subscription(Joy, self.declare_parameter("joy_topic", "/joy").value, self.on_joy, 10)
                 self.create_timer(0.02, self.tick)
                 self.create_timer(2.0, self.report)
-                self.get_logger().info(f"receiving on UDP {self.port}, publishing {topic} while button "
-                                       f"{self.deadman_button} is held")
+                self.get_logger().info(f"receiving on UDP {self.port}, publishing {topic}")
             else:
                 raise ValueError("mode must be send or receive")
 
         def on_drive(self, msg):
             self.sock.sendto(encode(self.seq, msg.drive.speed, msg.drive.steering_angle), (self.host, self.port))
             self.seq += 1
-
-        def on_joy(self, msg):
-            self.joy = (time.monotonic(), list(msg.buttons))
 
         def tick(self):
             while True:
@@ -101,9 +91,7 @@ def main():
                     self.last, self.last_t = pkt[1:], time.monotonic()
                     self.packets += 1
             now = time.monotonic()
-            joy_age = now - self.joy[0] if self.joy else math.inf
-            ok = deadman_held(self.deadman_button, self.joy[1] if self.joy else [], joy_age, self.joy_timeout)
-            speed, steer = relay_command(self.last, now - self.last_t, self.timeout, ok, self.max_speed, STEER_LIMIT)
+            speed, steer = relay_command(self.last, now - self.last_t, self.timeout, self.max_speed, STEER_LIMIT)
             msg = AckermannDriveStamped()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "base_link"
