@@ -112,7 +112,7 @@ have not been run in the ROS sim yet; that is the check above):
 | EvalDuct3034 (never used) | gru_u00150 | 5.6 laps / 60 s, 0 crashes, 6.7 m/s |
 | Sepang (never used, 487 m) | gru_u00100 | 1.4 laps / 90 s, 0 crashes, 7.4 m/s |
 
-## 2. Car (Jetson)
+## 2. Car (Jetson; the KV260 is section 3)
 
 ### Without Docker (recommended: the container's joystick button numbers can differ)
 
@@ -203,3 +203,37 @@ Button 4 (LB) is manual driving.
 - the steering sign on the stand.
 
 Bags from `record:=true` land in the repo root (`rosbag2_*`).
+
+## 3. Kria KV260 (in place of the Jetson)
+
+The KV260 runs the same native stack as the Jetson (Ubuntu 22.04 for Kria, ROS 2 Humble, this repo).
+On the board, with internet:
+
+```bash
+git clone https://github.com/akki-g/roboracer_ros2 ~/roboracer_ros2     # first time
+cd ~/roboracer_ros2 && git pull
+tools/car_native.sh setup      # once (sudo): ROS 2 Humble if missing, dependencies, VESC udev rule, groups, build
+tools/kv260_test.sh            # the policy test: no car hardware needed, nothing reaches the motor
+```
+
+After a later `git pull`: `tools/car_native.sh build`, then `tools/kv260_test.sh`.
+
+`tools/kv260_test.sh` prints PASS or FAIL for three checks:
+
+1. **Same actions as the Jetson.** 20 s of a drive recorded on the car (Nov 7, `gru1025_solo_u0950.npz`)
+   goes through the policy: the scan each tick used, the measured speed and the previous action. The
+   actions must match the ones the Jetson computed within 1e-6 (the Mac matches to 3e-15).
+2. **Timing.** One policy tick's work (scan message, TTC, observation, forward pass, safety layer),
+   5000 times. Pass: 99th percentile under 20 ms and no tick over 40 ms.
+3. **ROS loop.** The real `policy_node` fed the recorded 1081-beam scans at 40 Hz for 20 s, on topics under
+   `/board_test` (not `/scan`, `/odom`, `/drive`). Reports the command rate, late commands, tick time and
+   the node's CPU use.
+
+`tools/kv260_test.sh --no-ros` runs 1 and 2 with only `python3-numpy` installed;
+`tools/kv260_test.sh gru1025_obs_u0750.npz` times another policy.
+
+On the car, the KV260's one Ethernet port goes to the LiDAR (192.168.0.10), so it needs a static address
+on that subnet: `tools/car_native.sh lidar-net` sets 192.168.0.15/24 on the wired port and keeps it
+across reboots. It replaces DHCP on that port, so run it after `setup` (which needs internet), from a
+keyboard or the serial console; `sudo nmcli connection delete lidar` undoes it. Then
+`tools/car_native.sh check`, and the bringup, button check and launch lines of section 2 apply unchanged.

@@ -119,6 +119,7 @@ class PolicyNode(Node):
         self.active = False
         self.brake_events = 0
         self.forward_ms = deque(maxlen=500)  # policy forward-pass times, for the debug topic
+        self.tick_ms = deque(maxlen=500)  # whole-tick times (timer callback, start to end)
         self.stopped_ticks = 0
         self.stall_resets = 0
         self.speed_request = 0.0  # speed_smoothing state: the previous smoothed request
@@ -236,6 +237,7 @@ class PolicyNode(Node):
 
     # ------------------------------------------------------------------ tick
     def _tick(self):
+        tick_start = time.perf_counter()
         now = self.get_clock().now().nanoseconds * 1e-9
         scan_age = now - self.scan[0] if self.scan else math.inf
         odom_age = now - self.odom[0] if self.odom else math.inf
@@ -322,6 +324,11 @@ class PolicyNode(Node):
                 "last": round(self.forward_ms[-1], 3),
                 "p50": round(float(np.percentile(self.forward_ms, 50)), 3),
                 "p99": round(float(np.percentile(self.forward_ms, 99)), 3)},
+            "tick_ms": None if not self.tick_ms else {  # up to the previous tick
+                "last": round(self.tick_ms[-1], 3),
+                "p50": round(float(np.percentile(self.tick_ms, 50)), 3),
+                "p99": round(float(np.percentile(self.tick_ms, 99)), 3),
+                "max": round(max(self.tick_ms), 3)},
             "gru_h_norm": (round(float(np.linalg.norm(self.policy.h)), 3)
                            if self.policy is not None and getattr(self.policy, "arch", "mlp") == "cnn_gru" else None),
             "obs_summary": None if self.stack is None else {
@@ -333,6 +340,7 @@ class PolicyNode(Node):
             },
         }
         self.debug_pub.publish(String(data=json.dumps(debug)))
+        self.tick_ms.append((time.perf_counter() - tick_start) * 1e3)
 
     def stop(self):
         msg = AckermannDriveStamped()
