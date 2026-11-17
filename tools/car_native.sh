@@ -79,6 +79,18 @@ build() {
     if [ -e "$d" ] && [ ! -w "$d" ]; then die "$WS/$d is not writable (made by root?): sudo chown -R $USER: $WS/$d"; fi
   done
   echo "== colcon build (native: build/ install/ log/)"
+  # setuptools 80+ dropped what colcon's symlink install of Python packages uses ("error: option
+  # --editable not recognized"). Ubuntu 22.04's own is 59.6; a newer one comes from pip install --user
+  # (~/.local). The build then ignores ~/.local; nothing there is changed.
+  local st='import setuptools, sys; print(setuptools.__version__); sys.exit(int(setuptools.__version__.split(".")[0]) >= 80)'
+  if ! python3 -c "$st" >/dev/null 2>&1; then
+    if PYTHONNOUSERSITE=1 python3 -c "$st" >/dev/null 2>&1; then
+      echo "  note: setuptools $(python3 -c "$st" 2>/dev/null) in ~/.local is too new for colcon's symlink install: building with the system's Python packages only (PYTHONNOUSERSITE=1)"
+      export PYTHONNOUSERSITE=1
+    else
+      warn "setuptools $(python3 -c "$st" 2>/dev/null) is too new for colcon's symlink install; if Python packages fail with 'option --editable not recognized': sudo pip3 install 'setuptools<80'"
+    fi
+  fi
   colcon build --symlink-install
   echo "built. In each terminal: source /opt/ros/humble/setup.bash && source $WS/install/setup.bash"
 }
