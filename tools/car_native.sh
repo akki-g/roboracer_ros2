@@ -91,7 +91,17 @@ build() {
       warn "setuptools $(python3 -c "$st" 2>/dev/null) is too new for colcon's symlink install; if Python packages fail with 'option --editable not recognized': sudo pip3 install 'setuptools<80'"
     fi
   fi
-  colcon build --symlink-install
+  # A C++ compile of ROS code takes 1-1.5 GB. colcon builds one package per core with one compile job
+  # per core each: on the KV260 (4 GB, no swap) that runs out of memory and hangs the board. With
+  # little free memory, build one package at a time with the compile jobs that fit.
+  local jobs args=()
+  jobs="$(awk '/MemAvailable/ {j = int($2 / 1048576 / 1.5); print (j < 1 ? 1 : j)}' /proc/meminfo)"
+  if [ "${jobs:-1}" -lt "$(nproc)" ]; then
+    echo "  note: $(awk '/MemAvailable/ {printf "%.1f", $2 / 1048576}' /proc/meminfo) GB of memory free: one package at a time, ${jobs:-1} compile job(s). The first build takes a while."
+    export MAKEFLAGS="-j${jobs:-1}"
+    args=(--executor sequential)
+  fi
+  colcon build --symlink-install "${args[@]}"
   echo "built. In each terminal: source /opt/ros/humble/setup.bash && source $WS/install/setup.bash"
 }
 
