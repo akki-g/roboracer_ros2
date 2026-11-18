@@ -15,6 +15,9 @@ policy.npz (written by rl/export_policy.py), config["arch"]:
                                  n = tanh(x Win + bin + r * (h Whn + bhn)),
                                  h' = (1 - z) n + z h
         actor_hidden_*/actor_out_*   head: tanh hidden, linear out
+        config["dpu"] true (rl_dpu_policy_v1): scan rounded to steps of 1/128 in [0, 127/128],
+                                 only the first conv edge-padded, the others zero-padded,
+                                 ReLU head hidden layer
     log_std                  state-independent log-std (unused at deployment)
     obs_mean, obs_std        obs_dim-long normalizer (identity on the scans)
     config                   JSON string: arch, beam indices, frame stack, v_cmd_max,
@@ -33,14 +36,15 @@ def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
-def _edge_pad(x, kernel, stride):
-    """Pad the length axis (-2) for ceil(L / stride) VALID outputs, repeating edge values."""
+def _edge_pad(x, kernel, stride, mode="edge"):
+    """Pad the length axis (-2) for ceil(L / stride) VALID outputs, repeating edge values
+    (mode "constant": zeros)."""
     length = x.shape[-2]
     out = -(-length // stride)
     total = max((out - 1) * stride + kernel - length, 0)
     left = total // 2
     pad = [(0, 0)] * (x.ndim - 2) + [(left, total - left), (0, 0)]
-    return np.pad(x, pad, mode="edge")
+    return np.pad(x, pad, mode=mode)
 
 
 def _conv1d(x, kernel, bias, stride):
@@ -74,6 +78,7 @@ class NumpyPolicy:
             self.num_beams = int(self.config["num_beams"])
             self.conv_layers = [tuple(c) for c in self.config["conv_layers"]]  # (features, kernel, stride)
             self.gru_dim = int(self.config["gru_dim"])
+            self.dpu = bool(self.config.get("dpu", False))
             if self.obs_dim != self.num_beams + 3:
                 raise ValueError("cnn_gru policy expects one scan + speed + previous action")
             self.h = np.zeros(self.gru_dim)
@@ -102,8 +107,11 @@ class NumpyPolicy:
         p = self.p
         h = self.h if h is None else np.asarray(h, dtype=np.float64)
         z = x[..., : self.num_beams, None]
+        if self.dpu:
+            z = np.clip(np.round(z * 128.0), 0.0, 127.0) / 128.0
         for i, (_, k, s) in enumerate(self.conv_layers):
-            z = np.maximum(_conv1d(_edge_pad(z, k, s), p[f"conv{i}_kernel"], p[f"conv{i}_bias"], s), 0.0)
+            mode = "constant" if (self.dpu and i > 0) else "edge"
+            z = np.maximum(_conv1d(_edge_pad(z, k, s, mode), p[f"conv{i}_kernel"], p[f"conv{i}_bias"], s), 0.0)
         z = z.reshape(z.shape[:-2] + (-1,))
         z = np.maximum(z @ p["proj_kernel"] + p["proj_bias"], 0.0)
         g = np.concatenate([z, x[..., self.num_beams :]], axis=-1)  # + speed, previous action
@@ -111,7 +119,8 @@ class NumpyPolicy:
         u = _sigmoid(g @ p["gru_iz_kernel"] + p["gru_iz_bias"] + h @ p["gru_hz_kernel"])
         n = np.tanh(g @ p["gru_in_kernel"] + p["gru_in_bias"] + r * (h @ p["gru_hn_kernel"] + p["gru_hn_bias"]))
         h_new = (1.0 - u) * n + u * h
-        a = np.tanh(h_new @ p["actor_hidden_kernel"] + p["actor_hidden_bias"])
+        a = h_new @ p["actor_hidden_kernel"] + p["actor_hidden_bias"]
+        a = np.maximum(a, 0.0) if self.dpu else np.tanh(a)
         return a @ p["actor_out_kernel"] + p["actor_out_bias"], h_new
 
     def mean(self, obs):
