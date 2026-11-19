@@ -104,15 +104,19 @@ class Probe:
                                "check: ros2 node list | grep mux; ros2 topic info /drive -v")
         raise RuntimeError("preflight needs fresh /scan, /odom, /sensors/core, /joy and ALL buttons released")
 
-    def recorder_ready(self, recorder, recorder_name):
+    def scan_subscriptions(self):
+        return {bytes(x.endpoint_gid) for x in self.node.get_subscriptions_info_by_topic("/scan")}
+
+    def recorder_ready(self, recorder, before):
+        # Humble's `ros2 bag record` has no --node-name (later releases do), so the recorder is
+        # recognised as a /scan subscription that was not there before it started. The event
+        # publisher appears only when the test starts; /scan already exists.
         end = time.monotonic() + 10
         while time.monotonic() < end:
             self.spin()
             if recorder.poll() is not None:
                 raise RuntimeError("rosbag recorder exited before start")
-            # The event publisher appears only when the test starts. /scan already
-            # exists; a recorder subscription confirms discovery and startup.
-            if any(x.node_name == recorder_name for x in self.node.get_subscriptions_info_by_topic("/scan")):
+            if self.scan_subscriptions() - before:
                 return
         raise RuntimeError("recorder did not discover /scan")
 
@@ -140,10 +144,10 @@ def run_one(args, p, model=None):
     result = 1
     try:
         probe.check()
-        recorder_name = f"car_tests_recorder_{os.getpid()}_{time.monotonic_ns()}"
+        before = probe.scan_subscriptions()
         recorder = start(["ros2", "bag", "record", "--storage", "sqlite3", "--max-cache-size", "8388608",
-                          "--node-name", recorder_name, "-o", str(bag)] + TOPICS)
-        probe.recorder_ready(recorder, recorder_name)
+                          "-o", str(bag)] + TOPICS)
+        probe.recorder_ready(recorder, before)
         if interrupted:
             return 130
         if model:
