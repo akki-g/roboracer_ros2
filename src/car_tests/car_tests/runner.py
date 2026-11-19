@@ -84,18 +84,24 @@ class Probe:
         self.ros.spin_once(self.node, timeout_sec=0.02)
 
     def check(self):
+        # Each node is its own DDS participant and is discovered separately, so the mux's /drive
+        # subscription can appear after the sensor topics are already flowing: keep looking for
+        # it until the window ends instead of failing on the first fresh sample.
         end = time.monotonic() + 8
+        ready = False
         while time.monotonic() < end:
             self.spin()
             now = time.monotonic()
-            if len(self.received) == 4 and all(now - t < 0.25 for t in self.received.values()) and not self.rb:
+            ready = len(self.received) == 4 and all(now - t < 0.25 for t in self.received.values()) and not self.rb
+            if ready and self.node.count_subscribers("/drive"):
                 if self.node.count_publishers("/drive"):
                     raise RuntimeError("/drive already has a publisher; stop other autonomy/test nodes first")
                 if self.node.count_publishers("/car_test/policy_drive"):
                     raise RuntimeError("private policy topic already has a publisher")
-                if not self.node.count_subscribers("/drive"):
-                    raise RuntimeError("no /drive subscriber (bringup/mux missing)")
                 return
+        if ready:
+            raise RuntimeError("no /drive subscriber after 8 s: is ackermann_mux running? "
+                               "check: ros2 node list | grep mux; ros2 topic info /drive -v")
         raise RuntimeError("preflight needs fresh /scan, /odom, /sensors/core, /joy and ALL buttons released")
 
     def recorder_ready(self, recorder, recorder_name):
