@@ -27,6 +27,7 @@ def _nodes(context):
         raise RuntimeError(f"mode must be 'car' or 'sim', got {mode!r}")
     params = [os.path.join(share, 'config', f'policy_{mode}.yaml')]
     overrides = {'policy_path': LaunchConfiguration('policy_path').perform(context)}
+    overrides['drive_topic'] = LaunchConfiguration('drive_topic').perform(context)
     max_speed = LaunchConfiguration('max_speed').perform(context)
     if max_speed:
         overrides['max_speed'] = float(max_speed)
@@ -67,5 +68,7 @@ def generate_launch_description():
         DeclareLaunchArgument('speed_smoothing', default_value='', description='fraction of the way to a new '
                                                                               'speed request per tick (yaml: 1.0 = off; 0.5 smooths the throttle)'),
         DeclareLaunchArgument('record', default_value='false'),
+        DeclareLaunchArgument('drive_topic', default_value='/drive',
+                              description='policy output; car_tests uses a private topic through its RB guard'),
         OpaqueFunction(function=_nodes),
     ])
