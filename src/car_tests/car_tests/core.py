@@ -1,10 +1,14 @@
 """Deterministic maneuvers and fail-closed safety, using monotonic seconds only.
 
-No ROS or NumPy dependencies. A fault latches until this Engine is discarded.
+No ROS dependency. NumPy is used only for the grip test's swept-arc check (path_blocked):
+in pure Python it took 31 ms per call on the KV260's A53 (2026-11-19), more than a 20 ms
+tick. A fault latches until this Engine is discarded.
 Completed straight/steer runs need a release and NEW RB edge for the next run.
 """
 from dataclasses import asdict, dataclass
 import math
+
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -19,6 +23,8 @@ class Params:
     a_brake: float = 3.0
     margin: float = 0.5
     min_clearance: float = 0.35
+    car_half_width: float = 0.15
+    side_margin: float = 0.15
     short_reject: float = 0.05  # m: readings below this are LiDAR noise (scan_distances)
     cluster_beams: int = 3  # an obstacle must span this many adjacent beams (0.25 deg each)
     lat_acc_cap: float = 5.0
@@ -52,11 +58,11 @@ class Params:
         positive = ("rate_hz", "max_speed", "steer_limit", "max_duration", "stale_s", "cone_deg",
                     "a_brake", "margin", "min_clearance", "lat_acc_cap", "wheelbase", "erpm_gain",
                     "ramp", "accel_estimate", "reach_timeout", "step_s", "settle_s", "stop_timeout",
-                    "stopped_speed")
+                    "stopped_speed", "car_half_width")
         for name in positive:
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be positive")
-        for name in ("latency", "lidar_offset", "hold_s", "cruise_s"):
+        for name in ("latency", "lidar_offset", "hold_s", "cruise_s", "side_margin"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} cannot be negative")
         if not 0 <= self.short_reject < self.min_clearance:
@@ -121,11 +127,114 @@ def scan_distances(ranges, angle_min, angle_increment, range_min, range_max, p):
         return None, None
     # Readings below max(range_min, short_reject) are sensor noise, not obstacles; NaN/Inf are not
     # usable free-space evidence either. Absence of valid returns fails closed (None).
+    # Vectorised _cluster_min (the per-window Python loop took ~11 ms per scan on the KV260).
     lo = max(range_min, p.short_reject)
-    valid = [r if math.isfinite(r) and lo <= r <= range_max else None for r in ranges]
+    r = np.asarray(ranges, dtype=float)
+    ok = np.isfinite(r) & (r >= lo) & (r <= range_max)
     cone = math.radians(p.cone_deg)
-    forward = [v for i, v in enumerate(valid) if abs(angle_min + i * angle_increment) <= cone]
-    return _cluster_min(forward, p.cluster_beams), _cluster_min(valid, p.cluster_beams)
+    inside = np.abs(angle_min + angle_increment*np.arange(len(r))) <= cone
+    return _cluster_min_np(r[inside], ok[inside], p.cluster_beams), _cluster_min_np(r, ok, p.cluster_beams)
+
+
+def _cluster_min_np(values, ok, k):
+    """_cluster_min on arrays: smallest window-max over k adjacent all-valid beams, else None."""
+    if len(values) < k:
+        return None
+    windows = np.lib.stride_tricks.sliding_window_view(np.where(ok, values, np.inf), k)
+    full = np.lib.stride_tricks.sliding_window_view(ok, k).all(axis=1)
+    if not full.any():
+        return None
+    return float(windows[full].max(axis=1).min())
+
+
+def arc_point(s, curvature):
+    if abs(curvature) < 1e-8:
+        return s, 0.0
+    return math.sin(curvature*s)/curvature, (1-math.cos(curvature*s))/curvature
+
+
+def distance_to_arc(x, y, curvature, length):
+    """Exact distance to a finite rear-axle arc, including both endpoint caps."""
+    if abs(curvature) < 1e-8:
+        return math.hypot(x-max(0.0, min(length, x)), y)
+    ex, ey = arc_point(length, curvature)
+    distance = min(math.hypot(x, y), math.hypot(x-ex, y-ey))
+    sign = 1 if curvature > 0 else -1
+    phase = (sign*math.atan2(curvature*x, 1-curvature*y)) % (2*math.pi)
+    if phase <= abs(curvature)*length:
+        distance = min(distance, abs(math.hypot(x, y-1/curvature)-abs(1/curvature)))
+    return distance
+
+
+def path_blocked(scan, speed, steering, p):
+    """True: clustered obstacle in swept arc; False: clear; None: unobserved path.
+
+    Scan points are shifted from laser centre to rear axle. The rear axle travels
+    stop_distance(speed); the lateral tube is half-width + side margin. The same
+    longitudinal margin must cover overhang and model error. This is a constant
+    steering kinematic forecast, not a guarantee under slip or servo transients.
+    Noise rules match scan_distances: short_reject and k adjacent hit beams.
+    """
+    if scan is None:
+        return None
+    ranges, amin, inc, rmin, rmax = scan
+    if not ranges or not all(math.isfinite(x) for x in (amin, inc, rmin, rmax)) or inc <= 0:
+        return None
+    r = np.asarray(ranges, dtype=float)
+    valid_a = np.isfinite(r) & (r >= max(rmin, p.short_reject)) & (r <= rmax)
+    if not valid_a.any():
+        return None
+    curvature = math.tan(steering)/p.wheelbase
+    length, width = stop_distance(speed, p), p.car_half_width+p.side_margin
+    # Vectorised distance_to_arc over every valid beam (same maths, checked equal in tests).
+    a = amin + inc*np.arange(len(r))
+    rv = np.where(valid_a, r, 0.0)
+    x, y = rv*np.cos(a) + p.lidar_offset, rv*np.sin(a)
+    if abs(curvature) < 1e-8:
+        d = np.hypot(x - np.clip(x, 0.0, length), y)
+    else:
+        ex, ey = arc_point(length, curvature)
+        d = np.minimum(np.hypot(x, y), np.hypot(x-ex, y-ey))
+        sign = 1 if curvature > 0 else -1
+        phase = np.mod(sign*np.arctan2(curvature*x, 1-curvature*y), 2*math.pi)
+        on_arc = phase <= abs(curvature)*length
+        d = np.where(on_arc, np.minimum(d, np.abs(np.hypot(x, y-1/curvature)-abs(1/curvature))), d)
+    hit = valid_a & (d <= width)
+    k = p.cluster_beams
+    if len(hit) >= k and (np.convolve(hit.astype(np.int32), np.ones(k, dtype=np.int32), "valid") >= k).any():
+        return True
+    # Require observed returns along the approaching centreline and both sides.
+    # The current footprint is covered by min_clearance; rear blind-zone points
+    # do not constitute a future path. Missing observations never mean free space.
+    # Isolated rejected noise must not turn into a visibility fault: each sample point needs a full
+    # valid k-cluster within +-2k beams of its bearing (the Hokuyo also emits short 65.533 m sentinel
+    # streaks); broad dropouts and the scanner's FOV boundary still fail closed. Vectorised: the
+    # per-point Python loop cost ~5 ms per call on the KV260.
+    count = max(2, math.ceil(length/.10))
+    s = length*np.arange(1, count+1)/count
+    s = s[s >= p.lidar_offset+p.min_clearance]
+    if len(s) == 0:
+        return False
+    n = len(valid_a)
+    if abs(curvature) < 1e-8:
+        px, py = s, np.zeros_like(s)
+    else:
+        px, py = np.sin(curvature*s)/curvature, (1-np.cos(curvature*s))/curvature
+    offsets = np.array([-width, 0., width])
+    xx = px[:, None]-offsets[None, :]*np.sin(curvature*s)[:, None]-p.lidar_offset
+    yy = py[:, None]+offsets[None, :]*np.cos(curvature*s)[:, None]
+    index = np.round((np.arctan2(yy, xx)-amin)/inc).astype(np.int64).ravel()
+    half = k//2
+    if (index-half < 0).any() or (index+half >= n).any():
+        return None
+    if n < k:
+        return None
+    run_ok = np.convolve(valid_a.astype(np.int32), np.ones(k, dtype=np.int32), "valid") >= k  # run starts
+    prefix = np.concatenate(([0], np.cumsum(run_ok)))
+    first = np.maximum(0, index-2*k)
+    last = np.minimum(n, index+2*k+1)-k  # last allowed run start inside the window
+    has_run = (last >= first) & ((prefix[np.clip(last+1, 0, len(run_ok))]-prefix[np.clip(first, 0, len(run_ok))]) > 0)
+    return False if has_run.all() else None
 
 
 def steer_schedule(v, p):
@@ -148,6 +257,7 @@ class Engine:
         self.released = False  # require observing release after startup
         self.scan_t = self.sensor_t = self.joy_t = self.odom_t = None
         self.forward = self.near = None
+        self.path_scan = None
         self.speed = self.odom_speed = 0.0
         self.fault = 0
         self.run = -1
@@ -156,6 +266,7 @@ class Engine:
         self.request = (0.0, 0.0)
         self.request_t = None
         self.last_output = (0.0, 0.0)
+        self.last_drive_steer = 0.0  # last tick output, preserved across _brake's state change
         self.schedule = []
         self.step_index = 0
         self.target = 0.0
@@ -194,6 +305,7 @@ class Engine:
 
     def scan(self, ranges, angle_min, angle_increment, range_min, range_max, now):
         self.forward, self.near = scan_distances(ranges, angle_min, angle_increment, range_min, range_max, self.p)
+        self.path_scan = (list(ranges), angle_min, angle_increment, range_min, range_max)
         self.scan_t = now
 
     def sensor(self, erpm, fault, now):
@@ -225,11 +337,20 @@ class Engine:
         # moving scans: clearance tripped in 14%, forward distance in up to 75%), and its crashes
         # are what the test records. It keeps RB, caps, staleness and the lateral limit only.
         if self.test != "policy-sweep":
-            if self.forward is None or self.near is None:
+            if self.near is None or (self.test != "grip" and self.forward is None):
                 return "invalid forward scan"
             if self.near < self.p.min_clearance:
                 return "minimum clearance"
-            if self.forward <= stop_distance(effective_v, self.p):
+            if self.test == "grip":
+                # Check both commands during a steering transition. There is no
+                # measured steering sensor here; command echo is not feedback.
+                for angle in set((steer, self.last_drive_steer)):
+                    blocked = path_blocked(self.path_scan, effective_v, angle, self.p)
+                    if blocked is None:
+                        return "invalid path scan"
+                    if blocked:
+                        return "path stopping distance"
+            elif self.forward <= stop_distance(effective_v, self.p):
                 return "forward stopping distance"
         if max(self.speed, self.odom_speed) > self.p.max_speed + 0.10:
             return "measured overspeed"
@@ -347,6 +468,7 @@ class Engine:
         if not (0 <= v <= self.p.max_speed and abs(d) <= self.p.steer_limit):
             return self.abort("profile exceeded hard cap", now)
         self.last_output = (v, d)
+        self.last_drive_steer = d
         return self.last_output
 
     def exit_commands(self, reason, now):

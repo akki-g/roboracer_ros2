@@ -184,3 +184,23 @@ def test_other_faults(cause):
     if cause == "duration": e.started = -200
     if cause == "LB": e.joy([0, 0, 0, 0, 1, 1], 1.02)
     assert e.tick(1.02) == (0, 0) and e.phase == "aborted"
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_scan_distances_matches_python_cluster_min(seed):
+    # The vectorised scan_distances must equal the original list-based version exactly.
+    import random
+    from car_tests.core import _cluster_min
+    rng = random.Random(seed)
+    p = Params()
+    for _ in range(30):
+        n = rng.choice([1081, 50, 3, 2])
+        ranges = [rng.uniform(.01, 12.) for _ in range(n)]
+        for j in rng.sample(range(n), min(n, rng.randrange(0, 40))):
+            ranges[j] = rng.choice([float("nan"), float("inf"), .02, 65.533, .3])
+        amin, inc, rmin, rmax = -2.3562, .004363, .02, 30.
+        lo = max(rmin, p.short_reject)
+        valid = [r if math.isfinite(r) and lo <= r <= rmax else None for r in ranges]
+        forward = [v for i, v in enumerate(valid) if abs(amin + i * inc) <= math.radians(p.cone_deg)]
+        want = (_cluster_min(forward, p.cluster_beams), _cluster_min(valid, p.cluster_beams))
+        assert scan_distances(ranges, amin, inc, rmin, rmax, p) == want
